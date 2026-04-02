@@ -899,7 +899,7 @@ function PinPal() {
             type: "contact",
             key: `${c.name}-${c.city}-${index}`,
             title: c.name,
-            subtitle: [c.city, c.company, c.position].filter(Boolean).join(" · "),
+            subtitle: [c.city, c.company, c.position].filter(Boolean).join(" - "),
             cityGroup: Object.values(cityGroups).find((g) => g.city === c.city && g.contacts.some((gc) => gc.name === c.name)) || null,
           }));
 
@@ -911,7 +911,7 @@ function PinPal() {
             type: "destination",
             key: `destination-${name}`,
             title: toSentenceCasePlace(name),
-            subtitle: "Known city · no contacts yet",
+            subtitle: "Known city - no contacts yet",
             cityGroup: null,
             coords,
           }));
@@ -1315,7 +1315,7 @@ function PinPal() {
                     <div>Upload LinkedIn CSV</div>
                     <div style={{ fontSize: 11, color: "#AAA" }}>How do I get this?</div>
                   </div>
-                  <span style={{ fontSize: 16, color: "#AAA" }}>{showLinkedInGuide ? "?" : "?"}</span>
+                  <span style={{ fontSize: 16, color: "#AAA" }}>{showLinkedInGuide ? "^" : "v"}</span>
                 </button>
 
                 {showLinkedInGuide && (
@@ -1325,7 +1325,7 @@ function PinPal() {
                   }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#1A1A18" }}>Get your LinkedIn connections CSV</div>
                     <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>1. Open LinkedIn Settings & Privacy.</div>
-                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>2. Go to Data privacy ? Download your data.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>2. Go to Data privacy > Download your data.</div>
                     <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>3. Request the Connections archive, then upload the CSV here.</div>
                     <button onClick={() => fileInputRef.current?.click()} style={{ marginTop: 4, padding: "8px 14px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #0A66C2, #0077B5)", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer", width: "fit-content" }}>
                       Upload Connections.csv
@@ -1350,7 +1350,7 @@ function PinPal() {
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 24 }}>
-                <button onClick={loadDemoData} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E8541A", background: "rgba(232,84,26,0.08)", color: "#E8541A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Load demo data ?</button>
+                <button onClick={loadDemoData} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E8541A", background: "rgba(232,84,26,0.08)", color: "#E8541A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Load demo data</button>
                 <button onClick={() => importInputRef.current?.click()} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E0DDD7", background: "transparent", color: "#888", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Import saved session</button>
                 <input ref={importInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
               </div>
@@ -1368,7 +1368,7 @@ function PinPal() {
                     background: "#E8541A", color: "white", fontSize: 16, fontWeight: 700, cursor: "pointer",
                   }}
                 >
-                  Open full map ? {geoContacts.length} contacts in {Object.keys(cityGroups).length} cities
+                  Open full map: {geoContacts.length} contacts in {Object.keys(cityGroups).length} cities
                 </button>
               )}
             </div>
@@ -1401,7 +1401,7 @@ function PinPal() {
                     border: "1px solid #E8541A",
                     fontSize: 11, color: "#E8541A", fontWeight: 600,
                   }}>
-                    {geoContacts.length} contacts · {Object.keys(cityGroups).length} cities
+                    {geoContacts.length} contacts - {Object.keys(cityGroups).length} cities
                   </div>
                 )}
 
@@ -1412,7 +1412,7 @@ function PinPal() {
                   <button onClick={() => setPreviewZoom((z) => Math.max(1, z - 0.5))}
                     style={{ width: 30, height: 30, borderRadius: 6, border: "1px solid #E0DDD7", background: "rgba(247,245,240,0.9)", color: "#1A1A18", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>-</button>
                   <button onClick={() => { setPreviewCenter({ lat: 35, lng: -30 }); setPreviewZoom(2.2); }}
-                    style={{ width: 30, height: 30, borderRadius: 6, border: "1px solid #E0DDD7", background: "rgba(247,245,240,0.9)", color: "#1A1A18", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>¦</button>
+                    style={{ width: 30, height: 30, borderRadius: 6, border: "1px solid #E0DDD7", background: "rgba(247,245,240,0.9)", color: "#1A1A18", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>Reset</button>
                 </div>
 
                 <svg
@@ -1719,7 +1719,7 @@ function PinPal() {
             onFocus={(e) => e.target.style.borderColor = "#E8541A"}
             onBlur={(e) => { setTimeout(() => setSearchQuery(""), 200); e.target.style.borderColor = "#E0DDD7"; }}
           />
-          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#AAA" }}>?</span>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#AAA" }}>S</span>
           {searchResults.length > 0 && (
             <div style={{
               position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4,
@@ -1978,7 +1978,7 @@ function PinPal() {
           <div style={{ position: "absolute", bottom: 20, right: 20, display: "flex", flexDirection: "column", gap: 4 }}>
             <button onClick={() => setMapZoom((z) => Math.min(20, z + 0.5))} style={zoomBtnStyle}>+</button>
             <button onClick={() => setMapZoom((z) => Math.max(1, z - 0.5))} style={zoomBtnStyle}>-</button>
-            <button onClick={() => { setMapCenter({ lat: 20, lng: 15 }); setMapZoom(1.3); }} style={{ ...zoomBtnStyle, fontSize: 12 }}>¦</button>
+            <button onClick={() => { setMapCenter({ lat: 20, lng: 15 }); setMapZoom(1.3); }} style={{ ...zoomBtnStyle, fontSize: 12 }}>Reset</button>
           </div>
 
           {!showTripPlanner && (
@@ -2040,7 +2040,7 @@ function PinPal() {
                   onClick={() => setShowTripPlanner(false)}
                   style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#888", cursor: "pointer" }}
                 >
-                  ×
+                  X
                 </button>
               </div>
 
@@ -2156,7 +2156,7 @@ function PinPal() {
                       cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                     }}
                   >
-                    ×
+                    X
                   </button>
                 </div>
                 <div style={{ padding: "16px 12px" }}>
@@ -2182,8 +2182,8 @@ function PinPal() {
                               </button>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <button onClick={() => openContactProfile(contact)} style={{ padding: 0, border: "none", background: "transparent", fontWeight: 600, fontSize: 14, color: "#1A1A18", cursor: "pointer", textAlign: "left" }}>{contact.name}</button>
-                                <div style={{ fontSize: 12, color: "#AAA" }}>{[contact.city, contact.company].filter(Boolean).join(" · ")}</div>
-                                <div style={{ fontSize: 12, color: "#E8541A", marginTop: 4 }}>{Math.round(contact.distanceKm)} km · {getDistanceBand(contact.distanceKm)}</div>
+                                <div style={{ fontSize: 12, color: "#AAA" }}>{[contact.city, contact.company].filter(Boolean).join(" - ")}</div>
+                                <div style={{ fontSize: 12, color: "#E8541A", marginTop: 4 }}>{Math.round(contact.distanceKm)} km - {getDistanceBand(contact.distanceKm)}</div>
                               </div>
                               <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: `${SOURCE_COLORS[contact.source]}15`, color: SOURCE_COLORS[contact.source], flexShrink: 0 }}>
                                 {SOURCE_LABELS[contact.source]}
@@ -2191,7 +2191,7 @@ function PinPal() {
                             </div>
                             {(contact.position || (contact.tags || []).length) && (
                               <div style={{ fontSize: 12, color: "#666", marginLeft: 68 }}>
-                                {[contact.position, ...(contact.tags || []).map((tag) => `#${tag}`)].filter(Boolean).join(" · ")}
+                                {[contact.position, ...(contact.tags || []).map((tag) => `#${tag}`)].filter(Boolean).join(" - ")}
                               </div>
                             )}
                           </div>
@@ -2223,7 +2223,7 @@ function PinPal() {
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
-                ×
+                X
               </button>
             </div>
 
@@ -2259,7 +2259,7 @@ function PinPal() {
                       <button onClick={() => openContactProfile(c)} style={{ padding: 0, border: "none", background: "transparent", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#1A1A18", cursor: "pointer", textAlign: "left", maxWidth: "100%" }}>{c.name}</button>
                       {(c.position || c.company) && (
                         <div style={{ fontSize: 12, color: "#AAA", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {[c.position, c.company].filter(Boolean).join(" · ")}
+                          {[c.position, c.company].filter(Boolean).join(" - ")}
                         </div>
                       )}
                     </div>
@@ -2310,7 +2310,7 @@ function PinPal() {
                       cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                     }}
                   >
-                    ×
+                    X
                   </button>
                 </div>
                 <div style={{ padding: "16px 12px" }}>
@@ -2353,7 +2353,7 @@ function PinPal() {
                           </div>
                         </div>
                         <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-                          {hub.contacts.slice(0, 3).map((contact) => contact.name).join(" · ")}
+                          {hub.contacts.slice(0, 3).map((contact) => contact.name).join(" - ")}
                         </div>
                       </button>
                     )) : (
@@ -2395,7 +2395,7 @@ function PinPal() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 24, fontWeight: 700, color: "#1A1A18", lineHeight: 1.1 }}>{selectedContactProfile.name}</div>
-                  <div style={{ fontSize: 14, color: "#666", marginTop: 6 }}>{[selectedContactProfile.position, selectedContactProfile.company].filter(Boolean).join(" · ") || selectedContactProfile.city}</div>
+                  <div style={{ fontSize: 14, color: "#666", marginTop: 6 }}>{[selectedContactProfile.position, selectedContactProfile.company].filter(Boolean).join(" - ") || selectedContactProfile.city}</div>
                   {selectedContactProfile.city && <div style={{ fontSize: 13, color: "#AAA", marginTop: 4 }}>{selectedContactProfile.city}</div>}
                 </div>
               </div>
@@ -2403,7 +2403,7 @@ function PinPal() {
                 onClick={() => setSelectedContactProfile(null)}
                 style={{ width: 34, height: 34, borderRadius: 10, border: "1px solid #E0DDD7", background: "transparent", color: "#AAA", fontSize: 18, cursor: "pointer", flexShrink: 0 }}
               >
-                ×
+                X
               </button>
             </div>
             <div style={{ padding: 22, display: "grid", gap: 14 }}>
