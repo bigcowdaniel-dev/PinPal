@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Jumeirah Family Office Son avatar">
+  <rect width="256" height="256" rx="32" fill="#f3efe2"/>
+  <rect x="18" y="18" width="220" height="220" rx="26" fill="#e8ddc2"/>
+  <ellipse cx="128" cy="220" rx="68" ry="30" fill="#d8c49b"/>
+  <path d="M74 212c12-30 34-48 54-48 19 0 42 18 54 48" fill="#f9f5ee"/>
+  <ellipse cx="128" cy="120" rx="38" ry="47" fill="#d6b08c"/>
+  <path d="M94 112c0-37 14-58 34-58 21 0 34 18 34 52-11-9-21-13-34-13-13 0-25 7-34 19z" fill="#1f1c1f"/>
+  <path d="M95 109c8-20 22-31 40-31 15 0 28 9 37 28-15-5-29-6-40-5-12 1-24 4-37 8z" fill="#171517"/>
+  <path d="M101 146c7 8 16 12 27 12s20-4 27-12v12c-7 9-17 14-27 14-11 0-20-5-27-14z" fill="#c99c79"/>
+  <ellipse cx="112" cy="121" rx="4" ry="4.8" fill="#2d2421"/>
+  <ellipse cx="144" cy="121" rx="4" ry="4.8" fill="#2d2421"/>
+  <path d="M105 110c6-3 11-3 17 0" stroke="#6f5548" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M139 110c6-3 11-3 17 0" stroke="#6f5548" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M123 131c2 4 6 4 9 0" stroke="#a97862" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M111 145c12 6 22 6 34 0" stroke="#8b594e" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M86 84c11-26 29-40 52-40 20 0 37 11 46 28-14-4-28-5-40-3-12-8-36-4-58 15z" fill="#191619"/>
+  <path d="M92 166h72l-7 54H99z" fill="#ffffff"/>
+  <path d="M116 167h24v53h-24z" fill="#f2f2f2"/>
+  <path d="M111 172l17 11 17-11" stroke="#d9d0c4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M91 75c25-28 62-28 87 0" stroke="#ffffff" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M100 67c18-15 37-18 56-10 8 3 15 8 22 15" stroke="#f1ebdd" stroke-width="16" fill="none" stroke-linecap="round"/>
+</svg>

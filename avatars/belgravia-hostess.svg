@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Belgravia Hostess avatar">
+  <rect width="256" height="256" rx="32" fill="#f7f0ea"/>
+  <rect x="18" y="18" width="220" height="220" rx="26" fill="#2b2024"/>
+  <ellipse cx="128" cy="218" rx="68" ry="32" fill="#5b2031"/>
+  <path d="M78 212c13-33 36-54 50-54s37 21 50 54" fill="#6b2639"/>
+  <ellipse cx="128" cy="122" rx="40" ry="49" fill="#efcdb8"/>
+  <path d="M88 118c2-41 18-68 40-68 13 0 24 5 32 15 7 9 11 22 12 39-11-10-25-15-43-15-20 0-31 4-41 29z" fill="#3a2728"/>
+  <path d="M90 120c0-36 16-67 38-67 19 0 36 16 42 58-17-8-27-12-42-12-17 0-28 5-38 21z" fill="#2b1c1d"/>
+  <path d="M101 145c8 9 17 14 27 14s19-5 27-14v13c-7 10-16 17-27 17s-20-7-27-17z" fill="#e1b7a3"/>
+  <ellipse cx="112" cy="122" rx="4" ry="5" fill="#332324"/>
+  <ellipse cx="145" cy="122" rx="4" ry="5" fill="#332324"/>
+  <path d="M107 111c6-3 11-3 17 0" stroke="#71514f" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M138 111c6-3 11-3 17 0" stroke="#71514f" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M123 132c3 4 7 4 10 0" stroke="#b47c72" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M111 146c12 7 23 7 34 0" stroke="#8f3a46" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M92 82c9-26 28-43 49-43 17 0 33 10 43 26-15-5-29-6-41-4-17-7-36 0-51 21z" fill="#251819"/>
+  <path d="M99 86c14-10 30-16 46-15 17 1 29 8 36 21-14-6-28-9-42-9-15 0-27 1-40 3z" fill="#342223"/>
+  <path d="M102 176c8 7 18 10 26 10 10 0 20-3 28-10v38h-54z" fill="#111217"/>
+  <path d="M103 171h50l8 20h-66z" fill="#f1e8df"/>
+  <circle cx="101" cy="177" r="3.2" fill="#dccbbd"/>
+  <circle cx="155" cy="177" r="3.2" fill="#dccbbd"/>
+  <rect x="70" y="39" width="116" height="9" rx="4.5" fill="#c39a67"/>
+  <rect x="78" y="45" width="100" height="5" rx="2.5" fill="#f2d3a2" opacity=".7"/>
+</svg>
