@@ -1,4 +1,4 @@
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 // Built-in city geocoding database (expandable)
 const CITY_DB = {
@@ -50,6 +50,12 @@ const CITY_DB = {
   "calgary": { lat: 51.0447, lng: -114.0719 },
   "ottawa": { lat: 45.4215, lng: -75.6972 },
   "halifax": { lat: 44.6488, lng: -63.5752 },
+  "wolfville": { lat: 45.0918, lng: -64.3672 },
+  "antigonish": { lat: 45.6188, lng: -61.9986 },
+  "truro": { lat: 45.3656, lng: -63.2654 },
+  "sydney nova scotia": { lat: 46.1368, lng: -60.1942 },
+  "sydney ns": { lat: 46.1368, lng: -60.1942 },
+  "sydney, ns": { lat: 46.1368, lng: -60.1942 },
   "victoria": { lat: 48.4284, lng: -123.3656 },
   "winnipeg": { lat: 49.8951, lng: -97.1384 },
   "edmonton": { lat: 53.5461, lng: -113.4938 },
@@ -64,6 +70,9 @@ const CITY_DB = {
   "paris": { lat: 48.8566, lng: 2.3522 },
   "berlin": { lat: 52.52, lng: 13.405 },
   "munich": { lat: 48.1351, lng: 11.582 },
+  "frankfurt": { lat: 50.1109, lng: 8.6821 },
+  "dusseldorf": { lat: 51.2277, lng: 6.7735 },
+  "aberdeen": { lat: 57.1497, lng: -2.0943 },
   "amsterdam": { lat: 52.3676, lng: 4.9041 },
   "rome": { lat: 41.9028, lng: 12.4964 },
   "milan": { lat: 45.4642, lng: 9.19 },
@@ -92,6 +101,8 @@ const CITY_DB = {
   "shanghai": { lat: 31.2304, lng: 121.4737 },
   "hong kong": { lat: 22.3193, lng: 114.1694 },
   "singapore": { lat: 1.3521, lng: 103.8198 },
+  "shenzhen": { lat: 22.5431, lng: 114.0579 },
+  "guangzhou": { lat: 23.1291, lng: 113.2644 },
   "bangkok": { lat: 13.7563, lng: 100.5018 },
   "mumbai": { lat: 19.076, lng: 72.8777 },
   "delhi": { lat: 28.7041, lng: 77.1025 },
@@ -99,8 +110,12 @@ const CITY_DB = {
   "bangalore": { lat: 12.9716, lng: 77.5946 },
   "sydney": { lat: -33.8688, lng: 151.2093 },
   "melbourne": { lat: -37.8136, lng: 144.9631 },
+  "brisbane": { lat: -27.4698, lng: 153.0251 },
+  "perth": { lat: -31.9505, lng: 115.8605 },
   "auckland": { lat: -36.8485, lng: 174.7633 },
+  "wellington": { lat: -41.2866, lng: 174.7756 },
   "dubai": { lat: 25.2048, lng: 55.2708 },
+  "abu dhabi": { lat: 24.4539, lng: 54.3773 },
   "tel aviv": { lat: 32.0853, lng: 34.7818 },
   "cairo": { lat: 30.0444, lng: 31.2357 },
   "lagos": { lat: 6.5244, lng: 3.3792 },
@@ -392,16 +407,26 @@ function parseLinkedInCSV(text) {
   const contacts = [];
   const rows = parseCSV(text);
   if (rows.length === 0) return contacts;
-  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const headerRowIndex = rows.findIndex((row) => {
+    const lowered = row.map((cell) => String(cell || "").trim().toLowerCase());
+    return (
+      lowered.some((cell) => cell === "first name" || (cell.includes("first") && cell.includes("name"))) &&
+      lowered.some((cell) => cell === "last name" || (cell.includes("last") && cell.includes("name")))
+    );
+  });
+  if (headerRowIndex < 0) return contacts;
+
+  const header = rows[headerRowIndex].map((h) => h.trim().toLowerCase());
   const fnIdx = header.findIndex((h) => h.includes("first") && h.includes("name"));
   const lnIdx = header.findIndex((h) => h.includes("last") && h.includes("name"));
   const compIdx = header.findIndex((h) => h === "company" || h.includes("company"));
   const posIdx = header.findIndex((h) => h === "position" || h.includes("position") || h.includes("title"));
   const urlIdx = header.findIndex((h) => h.includes("url") || h.includes("profile"));
+  const connectedOnIdx = header.findIndex((h) => h.includes("connected") && h.includes("on"));
   // LinkedIn CSVs sometimes don't have city — check for it
   const cityIdx = header.findIndex((h) => h.includes("city") || h.includes("location"));
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
     const firstName = (fnIdx >= 0 ? row[fnIdx] : "").trim();
     const lastName = (lnIdx >= 0 ? row[lnIdx] : "").trim();
@@ -410,25 +435,191 @@ function parseLinkedInCSV(text) {
     const company = compIdx >= 0 ? (row[compIdx] || "").trim() : "";
     const position = posIdx >= 0 ? (row[posIdx] || "").trim() : "";
     const url = urlIdx >= 0 ? (row[urlIdx] || "").trim() : "";
+    const connectedOn = connectedOnIdx >= 0 ? (row[connectedOnIdx] || "").trim() : "";
     let city = cityIdx >= 0 ? (row[cityIdx] || "").trim() : "";
     // LinkedIn location is often "City, Country" or "Greater City Area"
     if (city) {
       city = city.replace(/greater\s+/i, "").replace(/\s+area$/i, "").split(",")[0].trim();
     }
-    contacts.push({ name, city, company, position, url, source: "linkedin" });
+    contacts.push({ name, city, company, position, url, connectedOn, source: "linkedin" });
   }
   return contacts;
+}
+
+function detectCsvSource(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) return null;
+  for (const row of rows) {
+    const header = row.map((cell) => normalizeLooseText(cell));
+    if (header.some((cell) => cell.includes("connected") && cell.includes("on"))) return "linkedin";
+    if (header.some((cell) => cell.includes("group membership")) || header.some((cell) => cell.includes("e-mail 1 - value"))) return "google";
+    if (header.some((cell) => cell.includes("business city")) || header.some((cell) => cell.includes("home city")) || header.some((cell) => cell.includes("other city"))) return "outlook";
+  }
+  return null;
+}
+
+function collectResolvedCityCandidates(values) {
+  const seen = new Set();
+  return values
+    .map((value) => resolveKnownCity(value))
+    .filter(Boolean)
+    .map((resolved) => resolved.city)
+    .filter((city) => {
+      const key = normalizeCityKey(city);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function parseOutlookCSV(text) {
+  const contacts = [];
+  const rows = parseCSV(text);
+  if (rows.length === 0) return contacts;
+  const headerRowIndex = rows.findIndex((row) => row.some((cell) => normalizeLooseText(cell).includes("business city")) || row.some((cell) => normalizeLooseText(cell) === "e-mail address"));
+  if (headerRowIndex < 0) return contacts;
+  const header = rows[headerRowIndex].map((h) => normalizeLooseText(h));
+  const firstNameIdx = header.findIndex((h) => h === "first name");
+  const lastNameIdx = header.findIndex((h) => h === "last name");
+  const nameIdx = header.findIndex((h) => h === "name" || h === "full name" || h === "display name");
+  const companyIdx = header.findIndex((h) => h === "company" || h.includes("company"));
+  const titleIdx = header.findIndex((h) => h === "job title" || h.includes("title"));
+  const emailIdx = header.findIndex((h) => h === "e-mail address" || h === "email address" || h === "email");
+  const noteIdx = header.findIndex((h) => h === "notes" || h.includes("notes"));
+  const cityIndexes = header
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => value === "business city" || value === "home city" || value === "other city")
+    .map(({ index }) => index);
+
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const explicitName = nameIdx >= 0 ? String(row[nameIdx] || "").trim() : "";
+    const firstName = firstNameIdx >= 0 ? String(row[firstNameIdx] || "").trim() : "";
+    const lastName = lastNameIdx >= 0 ? String(row[lastNameIdx] || "").trim() : "";
+    const name = explicitName || `${firstName} ${lastName}`.trim();
+    if (!name) continue;
+
+    const cityCandidates = collectResolvedCityCandidates(cityIndexes.map((index) => row[index]));
+    const city = cityCandidates[0] || "";
+
+    contacts.push({
+      name,
+      city,
+      company: companyIdx >= 0 ? String(row[companyIdx] || "").trim() : "",
+      position: titleIdx >= 0 ? String(row[titleIdx] || "").trim() : "",
+      email: emailIdx >= 0 ? String(row[emailIdx] || "").trim() : "",
+      note: noteIdx >= 0 ? String(row[noteIdx] || "").trim() : "",
+      guessCandidates: cityCandidates.slice(city ? 1 : 0, 3),
+      source: "outlook",
+    });
+  }
+
+  return contacts;
+}
+
+function parseGoogleContactsCSV(text) {
+  const contacts = [];
+  const rows = parseCSV(text);
+  if (rows.length === 0) return contacts;
+  const headerRowIndex = rows.findIndex((row) => row.some((cell) => normalizeLooseText(cell) === "group membership") || row.some((cell) => normalizeLooseText(cell) === "e-mail 1 - value"));
+  if (headerRowIndex < 0) return contacts;
+  const header = rows[headerRowIndex].map((h) => normalizeLooseText(h));
+  const nameIdx = header.findIndex((h) => h === "name");
+  const givenNameIdx = header.findIndex((h) => h === "given name");
+  const familyNameIdx = header.findIndex((h) => h === "family name");
+  const emailIdx = header.findIndex((h) => h === "e-mail 1 - value" || h === "email 1 - value");
+  const companyIdx = header.findIndex((h) => h === "organization 1 - name");
+  const titleIdx = header.findIndex((h) => h === "organization 1 - title");
+  const notesIdx = header.findIndex((h) => h === "notes");
+  const groupsIdx = header.findIndex((h) => h === "group membership");
+  const cityIndexes = header
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => value.includes("address") && value.endsWith("- city"))
+    .map(({ index }) => index);
+
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const explicitName = nameIdx >= 0 ? String(row[nameIdx] || "").trim() : "";
+    const givenName = givenNameIdx >= 0 ? String(row[givenNameIdx] || "").trim() : "";
+    const familyName = familyNameIdx >= 0 ? String(row[familyNameIdx] || "").trim() : "";
+    const name = explicitName || `${givenName} ${familyName}`.trim();
+    if (!name) continue;
+
+    const cityCandidates = collectResolvedCityCandidates(cityIndexes.map((index) => row[index]));
+    const city = cityCandidates[0] || "";
+    const groups = groupsIdx >= 0
+      ? String(row[groupsIdx] || "")
+          .split(" ::: ")
+          .map((group) => group.trim())
+          .filter((group) => group && group !== "* myContacts")
+      : [];
+
+    contacts.push({
+      name,
+      city,
+      company: companyIdx >= 0 ? String(row[companyIdx] || "").trim() : "",
+      position: titleIdx >= 0 ? String(row[titleIdx] || "").trim() : "",
+      email: emailIdx >= 0 ? String(row[emailIdx] || "").trim() : "",
+      note: notesIdx >= 0 ? String(row[notesIdx] || "").trim() : "",
+      tags: groups,
+      guessCandidates: cityCandidates.slice(city ? 1 : 0, 3),
+      source: "google",
+    });
+  }
+
+  return contacts;
+}
+
+function createLinkedInImportSession(parsedContacts, existingContacts) {
+  return createImportSession("linkedin", parsedContacts, existingContacts);
+}
+
+function createImportSession(source, parsedContacts, existingContacts) {
+  const { unique, duplicateCount, invalidCount } = dedupeImportedContacts(parsedContacts, existingContacts, source);
+  const explicitEvidenceContacts = unique
+    .map((contact) => {
+      const explicitCity = resolveKnownCity(contact.city);
+      return explicitCity ? { ...contact, ...explicitCity } : null;
+    })
+    .filter(Boolean);
+  const firstPassEvidenceTable = buildCompanyEvidence([...existingContacts, ...explicitEvidenceContacts]);
+  const firstPassResults = unique.map((contact) => guessImportedContactCity(contact, firstPassEvidenceTable));
+  const seededEvidenceContacts = firstPassResults
+    .filter((result) => result.status === "guessed" && result.contact.city && typeof result.contact.lat === "number" && typeof result.contact.lng === "number")
+    .map((result) => result.contact);
+  const evidenceTable = buildCompanyEvidence([...existingContacts, ...explicitEvidenceContacts, ...seededEvidenceContacts]);
+  const sessionId = `${source}-${Date.now()}`;
+  const items = unique.map((contact, index) => {
+    const guessed = guessImportedContactCity(contact, evidenceTable);
+    return {
+      id: `${sessionId}-${index}`,
+      status: guessed.status,
+      contact: guessed.contact,
+      selected: false,
+      reviewed: guessed.status !== "guessed",
+    };
+  });
+
+  return {
+    id: sessionId,
+    source,
+    items,
+    duplicateCount,
+    invalidCount,
+  };
 }
 
 const SOURCE_COLORS = {
   google: "#4285F4",
   linkedin: "#0A66C2",
+  outlook: "#0078D4",
   manual: "#E8541A",
 };
 
 const SOURCE_LABELS = {
   google: "Google",
   linkedin: "LinkedIn",
+  outlook: "Outlook",
   manual: "Manual",
 };
 
@@ -477,6 +668,293 @@ const DEFAULT_PREVIEW_CENTER = { lat: 35, lng: -30 };
 const DEFAULT_MAP_ZOOM = 1.3;
 const DEFAULT_PREVIEW_ZOOM = 2.2;
 const ROBINSON_CACHE = new Map();
+const LINKEDIN_GENERIC_COMPANIES = new Set([
+  "",
+  "self employed",
+  "self-employed",
+  "consultant",
+  "independent consultant",
+  "independent",
+  "freelance",
+  "freelancer",
+  "stealth",
+  "stealth startup",
+  "confidential",
+  "government of canada",
+  "deloitte",
+  "kpmg",
+  "ey",
+  "rbc",
+  "cibc capital markets",
+]);
+const LINKEDIN_EXACT_COMPANY_CITY_HINTS = new Map([
+  ["dalhousie university", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["saint marys university", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["net zero atlantic", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["halifax water", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["nova scotia power", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["invest nova scotia", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["build nova scotia", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this organization with Halifax" }],
+  ["everwind", { city: "Halifax", confidence: "medium", reason: "Global seed map defaults this company to Halifax" }],
+  ["everwind fuels", { city: "Halifax", confidence: "medium", reason: "Global seed map defaults this company to Halifax" }],
+  ["strum consulting", { city: "Halifax", confidence: "medium", reason: "Global seed map defaults this company to Halifax" }],
+  ["mcinnes cooper", { city: "Halifax", confidence: "medium", reason: "Global seed map defaults this company to Halifax" }],
+  ["membertou development", { city: "Sydney Nova Scotia", confidence: "high", reason: "Global seed map strongly associates this organization with Sydney, Nova Scotia" }],
+  ["membertou development corporation", { city: "Sydney Nova Scotia", confidence: "high", reason: "Global seed map strongly associates this organization with Sydney, Nova Scotia" }],
+  ["natural resources canada nrcan", { city: "Ottawa", confidence: "high", reason: "Global seed map strongly associates this institution with Ottawa" }],
+  ["natural resources canada ressources naturelles canada", { city: "Ottawa", confidence: "high", reason: "Global seed map strongly associates this institution with Ottawa" }],
+  ["global affairs canada affaires mondiales canada", { city: "Ottawa", confidence: "high", reason: "Global seed map strongly associates this institution with Ottawa" }],
+  ["export development canada", { city: "Ottawa", confidence: "high", reason: "Global seed map strongly associates this institution with Ottawa" }],
+  ["government of nova scotia", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this institution with Halifax" }],
+  ["province of nova scotia", { city: "Halifax", confidence: "high", reason: "Global seed map strongly associates this institution with Halifax" }],
+  ["seaspan corporation", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this company with Vancouver" }],
+  ["vancouver coastal health", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this institution with Vancouver" }],
+  ["provincial health services authority", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this institution with Vancouver" }],
+  ["simon fraser university", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this institution with Vancouver" }],
+  ["the university of british columbia", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this institution with Vancouver" }],
+  ["ubc", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this institution with Vancouver" }],
+  ["atlas", { city: "Vancouver", confidence: "medium", reason: "Global seed map defaults this company to Vancouver" }],
+  ["atlas corp", { city: "Vancouver", confidence: "medium", reason: "Global seed map defaults this company to Vancouver" }],
+  ["lululemon", { city: "Vancouver", confidence: "high", reason: "Global seed map strongly associates this company with Vancouver" }],
+  ["university of victoria", { city: "Victoria", confidence: "high", reason: "Global seed map strongly associates this institution with Victoria" }],
+  ["imperial oil", { city: "Calgary", confidence: "medium", reason: "Global seed map defaults this company to Calgary" }],
+  ["compass energy consulting", { city: "Calgary", confidence: "medium", reason: "Global seed map defaults this company to Calgary" }],
+  ["rbc capital markets", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["rbc", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["cibc capital markets", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["cibc", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["bmo capital markets", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["bmo", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["scotiabank", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["td", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["td securities", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["cpp investments", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["brookfield asset management", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["brookfield", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["omers", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this institution to Toronto" }],
+  ["teachers", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this institution to Toronto" }],
+  ["tmx group", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this institution to Toronto" }],
+  ["national bank financial", { city: "Montreal", confidence: "medium", reason: "Global seed map defaults this company to Montreal" }],
+  ["goldman sachs", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["morgan stanley", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["j p morgan", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["jpmorganchase", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["citi", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["bank of america", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["blackrock", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["blackstone", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["apollo global management", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["kkr", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["evercore", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["lazard", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["jefferies", { city: "New York", confidence: "medium", reason: "Global seed map defaults this company to New York" }],
+  ["hsbc", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["barclays", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["lloyds banking group", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["standard chartered", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["bp", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["wood mackenzie", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["res", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["shell", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["octopus energy", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["national grid", { city: "London", confidence: "medium", reason: "Global seed map defaults this company to London" }],
+  ["london stock exchange group", { city: "London", confidence: "medium", reason: "Global seed map defaults this institution to London" }],
+  ["deutsche bank", { city: "Frankfurt", confidence: "medium", reason: "Global seed map defaults this company to Frankfurt" }],
+  ["commerzbank", { city: "Frankfurt", confidence: "medium", reason: "Global seed map defaults this company to Frankfurt" }],
+  ["siemens", { city: "Munich", confidence: "medium", reason: "Global seed map defaults this company to Munich" }],
+  ["siemens energy", { city: "Munich", confidence: "medium", reason: "Global seed map defaults this company to Munich" }],
+  ["allianz", { city: "Munich", confidence: "medium", reason: "Global seed map defaults this company to Munich" }],
+  ["uniper", { city: "Dusseldorf", confidence: "medium", reason: "Global seed map defaults this company to Dusseldorf" }],
+  ["bnp paribas", { city: "Paris", confidence: "medium", reason: "Global seed map defaults this company to Paris" }],
+  ["societe generale", { city: "Paris", confidence: "medium", reason: "Global seed map defaults this company to Paris" }],
+  ["axa", { city: "Paris", confidence: "medium", reason: "Global seed map defaults this company to Paris" }],
+  ["totalenergies", { city: "Paris", confidence: "medium", reason: "Global seed map defaults this company to Paris" }],
+  ["ing", { city: "Amsterdam", confidence: "medium", reason: "Global seed map defaults this company to Amsterdam" }],
+  ["abn amro", { city: "Amsterdam", confidence: "medium", reason: "Global seed map defaults this company to Amsterdam" }],
+  ["adyen", { city: "Amsterdam", confidence: "medium", reason: "Global seed map defaults this company to Amsterdam" }],
+  ["ubs", { city: "Zurich", confidence: "medium", reason: "Global seed map defaults this company to Zurich" }],
+  ["credit suisse", { city: "Zurich", confidence: "medium", reason: "Global seed map defaults this company to Zurich" }],
+  ["equinor", { city: "Oslo", confidence: "medium", reason: "Global seed map defaults this company to Oslo" }],
+  ["aker solutions", { city: "Oslo", confidence: "medium", reason: "Global seed map defaults this company to Oslo" }],
+  ["maersk", { city: "Copenhagen", confidence: "medium", reason: "Global seed map defaults this company to Copenhagen" }],
+  ["dbs bank", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this company to Singapore" }],
+  ["ocbc bank", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this company to Singapore" }],
+  ["uob", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this company to Singapore" }],
+  ["gic", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this institution to Singapore" }],
+  ["temasek", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this institution to Singapore" }],
+  ["grab", { city: "Singapore", confidence: "medium", reason: "Global seed map defaults this company to Singapore" }],
+  ["mizuho", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["mizuho bank", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["mitsubishi ufj", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["mufg", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["nomura", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["softbank", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["jera", { city: "Tokyo", confidence: "medium", reason: "Global seed map defaults this company to Tokyo" }],
+  ["hong kong exchanges and clearing", { city: "Hong Kong", confidence: "medium", reason: "Global seed map defaults this institution to Hong Kong" }],
+  ["hkex", { city: "Hong Kong", confidence: "medium", reason: "Global seed map defaults this institution to Hong Kong" }],
+  ["cathay pacific", { city: "Hong Kong", confidence: "medium", reason: "Global seed map defaults this company to Hong Kong" }],
+  ["clp", { city: "Hong Kong", confidence: "medium", reason: "Global seed map defaults this company to Hong Kong" }],
+  ["beijing oriental yuhong waterproof technology", { city: "Beijing", confidence: "medium", reason: "Global seed map defaults this company to Beijing" }],
+  ["wood", { city: "Aberdeen", confidence: "medium", reason: "Global seed map defaults this company to Aberdeen" }],
+  ["shelf drilling", { city: "Dubai", confidence: "medium", reason: "Global seed map defaults this company to Dubai" }],
+  ["king spalding", { city: "Atlanta", confidence: "medium", reason: "Global seed map defaults this company to Atlanta" }],
+  ["microsoft", { city: "Seattle", confidence: "medium", reason: "Global seed map defaults this company to Seattle" }],
+  ["amazon", { city: "Seattle", confidence: "medium", reason: "Global seed map defaults this company to Seattle" }],
+  ["canadian renewable energy association canrea", { city: "Ottawa", confidence: "medium", reason: "Global seed map defaults this association to Ottawa" }],
+  ["canadian hydrogen association cha", { city: "Ottawa", confidence: "medium", reason: "Global seed map defaults this association to Ottawa" }],
+  ["stormfisher hydrogen", { city: "Toronto", confidence: "medium", reason: "Global seed map defaults this company to Toronto" }],
+  ["aegir insights", { city: "Copenhagen", confidence: "medium", reason: "Global seed map defaults this company to Copenhagen" }],
+  ["dimensional energy", { city: "Houston", confidence: "medium", reason: "Global seed map defaults this company to Houston" }],
+  ["wsp in canada", { city: "Montreal", confidence: "medium", reason: "Global seed map defaults this company to Montreal" }],
+  ["ilf consulting engineers in germany", { city: "Munich", confidence: "medium", reason: "Global seed map defaults this company to Munich" }],
+  ["ilf consulting engineers", { city: "Munich", confidence: "medium", reason: "Global seed map defaults this company to Munich" }],
+]);
+const LINKEDIN_COMPANY_CITY_HINTS = [
+  { pattern: /\bdalhousie\b/, city: "Halifax", confidence: "high", reason: "Organization strongly implies Halifax" },
+  { pattern: /\bsaint mary'?s university\b|\bst\.?\s*mary'?s university\b/, city: "Halifax", confidence: "high", reason: "Organization strongly implies Halifax" },
+  { pattern: /\bnet zero atlantic\b/, city: "Halifax", confidence: "high", reason: "Organization strongly implies Halifax" },
+  { pattern: /\bhalifax water\b|\bport halifax\b|\bhalifax climate\b|\bhalifax immigration partnership\b|\bhalifax regional municipality\b/, city: "Halifax", confidence: "high", reason: "Organization strongly implies Halifax" },
+  { pattern: /\bnova scotia power\b|\binvest nova scotia\b|\bnova scotia pension\b|\bbuild nova scotia\b|\bsymphony nova scotia\b|\beastward energy\b/, city: "Halifax", confidence: "high", reason: "Organization strongly implies Halifax" },
+  { pattern: /\bgovernment of nova scotia\b|\bprovince of nova scotia\b|\bnova scotia department\b|\bnova scotia community college\b|\bnscc\b/, city: "Halifax", confidence: "medium", reason: "Provincial organization likely centers in Halifax" },
+  { pattern: /\beverwind\b|\bstrum consulting\b|\bmcinnes cooper\b|\bvolta\b|\bacadia center\b/, city: "Halifax", confidence: "medium", reason: "Company is commonly associated with Halifax" },
+  { pattern: /\bmembertou\b|\bcape breton\b/, city: "Sydney Nova Scotia", confidence: "high", reason: "Organization strongly implies Sydney, Nova Scotia" },
+  { pattern: /\bacadia university\b/, city: "Wolfville", confidence: "high", reason: "Organization strongly implies Wolfville" },
+  { pattern: /\bst\.?\s*francis xavier\b|\bstfx\b/, city: "Antigonish", confidence: "high", reason: "Organization strongly implies Antigonish" },
+  { pattern: /\bgoldman sachs\b|\bmorgan stanley\b|\bj\.?\s*p\.?\s*morgan\b|\bjpmorganchase\b|\bciti\b|\bbank of america\b|\balphasense\b/, city: "New York", confidence: "medium", reason: "Global finance firm defaults to New York in the fallback heuristic" },
+  { pattern: /\brbc\b|\brbc capital markets\b|\bcibc\b|\bcibc capital markets\b|\bbmo\b|\bbmo capital markets\b|\bscotiabank\b|\btd\b|\btd securities\b|\bcpp investments\b/, city: "Toronto", confidence: "medium", reason: "Canadian finance firm defaults to Toronto in the fallback heuristic" },
+  { pattern: /\bnational bank financial\b/, city: "Montreal", confidence: "medium", reason: "Firm is commonly associated with Montreal in the fallback heuristic" },
+  { pattern: /\bnatural resources canada\b|\bnrcan\b|\bglobal affairs canada\b|\bexport development canada\b|\bhouse of commons of canada\b|\bgovernment of canada\b/, city: "Ottawa", confidence: "medium", reason: "Federal institution defaults to Ottawa in the fallback heuristic" },
+  { pattern: /\bcanrea\b|\bcanadian renewable energy association\b|\bcanadian hydrogen association\b/, city: "Ottawa", confidence: "medium", reason: "Canadian association defaults to Ottawa in the fallback heuristic" },
+  { pattern: /\bvancouver coastal health\b|\bprovincial health services authority\b|\bsimon fraser university\b|\bthe university of british columbia\b|\bubc\b|\bseaspan\b|\batlas corp\b|\blululemon\b/, city: "Vancouver", confidence: "medium", reason: "Organization is commonly associated with Vancouver" },
+  { pattern: /\buniversity of victoria\b/, city: "Victoria", confidence: "high", reason: "Organization strongly implies Victoria" },
+  { pattern: /\bimperial oil\b/, city: "Calgary", confidence: "medium", reason: "Company commonly defaults to Calgary in the fallback heuristic" },
+  { pattern: /\bwood\b|\bwood mackenzie\b/, city: "Aberdeen", confidence: "medium", reason: "Energy firm commonly defaults to Aberdeen in the fallback heuristic" },
+  { pattern: /\bshelf drilling\b/, city: "Dubai", confidence: "medium", reason: "Company commonly defaults to Dubai in the fallback heuristic" },
+  { pattern: /\bking and spalding\b|\bking\s*&\s*spalding\b/, city: "Atlanta", confidence: "medium", reason: "Firm commonly defaults to Atlanta in the fallback heuristic" },
+  { pattern: /\bmicrosoft\b|\bamazon\b/, city: "Seattle", confidence: "medium", reason: "Company commonly defaults to Seattle in the fallback heuristic" },
+  { pattern: /\baegir insights\b|\bmaersk\b/, city: "Copenhagen", confidence: "medium", reason: "Nordic firm commonly defaults to Copenhagen in the fallback heuristic" },
+];
+const LINKEDIN_CITY_TEXT_HINTS = [
+  { pattern: /\bhalifax\b/, city: "Halifax", confidence: "high", reason: "Company or title explicitly mentions Halifax" },
+  { pattern: /\bwolfville\b/, city: "Wolfville", confidence: "high", reason: "Company or title explicitly mentions Wolfville" },
+  { pattern: /\bantigonish\b/, city: "Antigonish", confidence: "high", reason: "Company or title explicitly mentions Antigonish" },
+  { pattern: /\btruro\b/, city: "Truro", confidence: "high", reason: "Company or title explicitly mentions Truro" },
+  { pattern: /\bsydney\s*,?\s*ns\b|\bsydney\s+nova scotia\b/, city: "Sydney Nova Scotia", confidence: "high", reason: "Company or title explicitly mentions Sydney, Nova Scotia" },
+  { pattern: /\bcape breton\b|\bmembertou\b/, city: "Sydney Nova Scotia", confidence: "high", reason: "Company or title explicitly mentions Cape Breton / Membertou" },
+  { pattern: /\bsydney\b/, city: "Sydney", confidence: "high", reason: "Company or title explicitly mentions Sydney" },
+  { pattern: /\bvancouver\b/, city: "Vancouver", confidence: "high", reason: "Company or title explicitly mentions Vancouver" },
+  { pattern: /\btoronto\b/, city: "Toronto", confidence: "high", reason: "Company or title explicitly mentions Toronto" },
+  { pattern: /\bmontreal\b/, city: "Montreal", confidence: "high", reason: "Company or title explicitly mentions Montreal" },
+  { pattern: /\bcalgary\b/, city: "Calgary", confidence: "high", reason: "Company or title explicitly mentions Calgary" },
+  { pattern: /\bottawa\b/, city: "Ottawa", confidence: "high", reason: "Company or title explicitly mentions Ottawa" },
+  { pattern: /\bnew york\b|\bnyc\b/, city: "New York", confidence: "high", reason: "Company or title explicitly mentions New York" },
+  { pattern: /\blondon\b/, city: "London", confidence: "high", reason: "Company or title explicitly mentions London" },
+  { pattern: /\bdublin\b/, city: "Dublin", confidence: "high", reason: "Company or title explicitly mentions Dublin" },
+  { pattern: /\bamsterdam\b/, city: "Amsterdam", confidence: "high", reason: "Company or title explicitly mentions Amsterdam" },
+  { pattern: /\bparis\b/, city: "Paris", confidence: "high", reason: "Company or title explicitly mentions Paris" },
+  { pattern: /\bberlin\b/, city: "Berlin", confidence: "high", reason: "Company or title explicitly mentions Berlin" },
+  { pattern: /\bmunich\b|\bmuenchen\b/, city: "Munich", confidence: "high", reason: "Company or title explicitly mentions Munich" },
+  { pattern: /\bfrankfurt\b/, city: "Frankfurt", confidence: "high", reason: "Company or title explicitly mentions Frankfurt" },
+  { pattern: /\bzurich\b/, city: "Zurich", confidence: "high", reason: "Company or title explicitly mentions Zurich" },
+  { pattern: /\bgeneva\b/, city: "Geneva", confidence: "high", reason: "Company or title explicitly mentions Geneva" },
+  { pattern: /\bbrussels\b/, city: "Brussels", confidence: "high", reason: "Company or title explicitly mentions Brussels" },
+  { pattern: /\bmadrid\b/, city: "Madrid", confidence: "high", reason: "Company or title explicitly mentions Madrid" },
+  { pattern: /\bbarcelona\b/, city: "Barcelona", confidence: "high", reason: "Company or title explicitly mentions Barcelona" },
+  { pattern: /\bmilan\b/, city: "Milan", confidence: "high", reason: "Company or title explicitly mentions Milan" },
+  { pattern: /\bcopenhagen\b/, city: "Copenhagen", confidence: "high", reason: "Company or title explicitly mentions Copenhagen" },
+  { pattern: /\bstockholm\b/, city: "Stockholm", confidence: "high", reason: "Company or title explicitly mentions Stockholm" },
+  { pattern: /\boslo\b/, city: "Oslo", confidence: "high", reason: "Company or title explicitly mentions Oslo" },
+  { pattern: /\bdubai\b/, city: "Dubai", confidence: "high", reason: "Company or title explicitly mentions Dubai" },
+  { pattern: /\babu dhabi\b/, city: "Abu Dhabi", confidence: "high", reason: "Company or title explicitly mentions Abu Dhabi" },
+  { pattern: /\bsingapore\b/, city: "Singapore", confidence: "high", reason: "Company or title explicitly mentions Singapore" },
+  { pattern: /\bhong kong\b/, city: "Hong Kong", confidence: "high", reason: "Company or title explicitly mentions Hong Kong" },
+  { pattern: /\bbeijing\b/, city: "Beijing", confidence: "high", reason: "Company or title explicitly mentions Beijing" },
+  { pattern: /\bshanghai\b/, city: "Shanghai", confidence: "high", reason: "Company or title explicitly mentions Shanghai" },
+  { pattern: /\bshenzhen\b/, city: "Shenzhen", confidence: "high", reason: "Company or title explicitly mentions Shenzhen" },
+  { pattern: /\bguangzhou\b/, city: "Guangzhou", confidence: "high", reason: "Company or title explicitly mentions Guangzhou" },
+  { pattern: /\btokyo\b/, city: "Tokyo", confidence: "high", reason: "Company or title explicitly mentions Tokyo" },
+  { pattern: /\bosaka\b/, city: "Osaka", confidence: "high", reason: "Company or title explicitly mentions Osaka" },
+  { pattern: /\bseoul\b/, city: "Seoul", confidence: "high", reason: "Company or title explicitly mentions Seoul" },
+  { pattern: /\bmelbourne\b/, city: "Melbourne", confidence: "high", reason: "Company or title explicitly mentions Melbourne" },
+  { pattern: /\bbrisbane\b/, city: "Brisbane", confidence: "high", reason: "Company or title explicitly mentions Brisbane" },
+  { pattern: /\bperth\b/, city: "Perth", confidence: "high", reason: "Company or title explicitly mentions Perth" },
+  { pattern: /\bauckland\b/, city: "Auckland", confidence: "high", reason: "Company or title explicitly mentions Auckland" },
+  { pattern: /\bwellington\b/, city: "Wellington", confidence: "high", reason: "Company or title explicitly mentions Wellington" },
+  { pattern: /\bbay street\b/, city: "Toronto", confidence: "medium", reason: "Company or title implies Toronto finance context" },
+  { pattern: /\bwall street\b|\blower manhattan\b/, city: "New York", confidence: "medium", reason: "Company or title implies New York finance context" },
+];
+
+function normalizeLooseText(value) {
+  return String(value || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function getSearchFieldScore(query, value, options = {}) {
+  const normalizedQuery = normalizeLooseText(query);
+  const normalizedValue = normalizeLooseText(value);
+  if (!normalizedQuery || !normalizedValue || !normalizedValue.includes(normalizedQuery)) return -1;
+  let score = options.base || 0;
+  if (normalizedValue === normalizedQuery) score += options.exactBonus ?? 160;
+  else if (normalizedValue.startsWith(normalizedQuery)) score += options.prefixBonus ?? 100;
+  else if (normalizedValue.split(" ").some((word) => word.startsWith(normalizedQuery))) score += options.wordBonus ?? 65;
+  else score += options.partialBonus ?? 35;
+  score -= Math.min(normalizedValue.length, 120) * 0.05;
+  return score;
+}
+
+function useDebouncedValue(value, delay = 140) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timeoutId = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timeoutId);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+const DebouncedTextInput = React.memo(function DebouncedTextInput({
+  value,
+  onCommit,
+  onDraftChange,
+  delay = 140,
+  ...inputProps
+}) {
+  const [draft, setDraft] = useState(value || "");
+  const debouncedDraft = useDebouncedValue(draft, delay);
+
+  useEffect(() => {
+    setDraft(value || "");
+  }, [value]);
+
+  useEffect(() => {
+    if (debouncedDraft !== value) {
+      onCommit(debouncedDraft);
+    }
+  }, [debouncedDraft, value, onCommit]);
+
+  return (
+    <input
+      {...inputProps}
+      value={draft}
+      onChange={(event) => {
+        const nextValue = event.target.value;
+        setDraft(nextValue);
+        if (onDraftChange) onDraftChange(nextValue, event);
+      }}
+    />
+  );
+});
+
+function normalizeCompanyKey(companyName) {
+  const compact = normalizeLooseText(companyName)
+    .replace(/['’]/g, "")
+    .replace(/[.,()|/&+-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact) return "";
+  return compact
+    .replace(/\b(inc|corp|corporation|llc|ltd|limited|co)\b\.?/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function normalizeTags(tags) {
   if (Array.isArray(tags)) return tags.map((tag) => String(tag).trim()).filter(Boolean);
@@ -487,14 +965,27 @@ function normalizeTags(tags) {
 }
 
 function normalizeContact(contact) {
+  const resolvedCitySource =
+    contact.citySource || (contact.source === "manual" && String(contact.city || "").trim() ? "manual" : undefined);
   return {
     ...contact,
     source: contact.source || "manual",
     company: contact.company || "",
     position: contact.position || "",
     note: contact.note || "",
+    email: contact.email || "",
     url: contact.url || "",
     city: contact.city || "",
+    connectedOn: contact.connectedOn || "",
+    needsLocation: Boolean(contact.needsLocation),
+    pinned: Boolean(contact.pinned),
+    locationReviewDeferred: Boolean(contact.locationReviewDeferred),
+    citySource: resolvedCitySource,
+    guessConfidence: contact.guessConfidence || null,
+    guessReason: contact.guessReason || "",
+    guessCandidates: Array.isArray(contact.guessCandidates)
+      ? contact.guessCandidates.map((candidate) => String(candidate).trim()).filter(Boolean)
+      : [],
     tags: normalizeTags(contact.tags),
   };
 }
@@ -503,8 +994,71 @@ function getDefaultContacts() {
   return Array.isArray(window.DEFAULT_CONTACTS) ? window.DEFAULT_CONTACTS : [];
 }
 
+function getDefaultContactKeySet() {
+  return new Set(getDefaultContacts().map((contact) => getPersistentContactKey(contact)));
+}
+
+function isDefaultDemoContact(contact, demoKeySet = getDefaultContactKeySet()) {
+  return demoKeySet.has(getPersistentContactKey(contact));
+}
+
+function stripDefaultDemoContacts(contacts, demoKeySet = getDefaultContactKeySet()) {
+  return contacts.filter((contact) => !isDefaultDemoContact(contact, demoKeySet));
+}
+
+function PinGlyph({ filled = false, color = "#E8541A", size = 14 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path
+        d="M15.5 3.5c-.3 0-.6.12-.82.34l-1.08 1.08-5.44 1.63c-.3.09-.56.25-.78.47l-.18.18c-.46.46-.46 1.2 0 1.66l2.33 2.33-4.82 5.87c-.3.37-.27.9.07 1.23l1.11 1.11c.34.34.87.37 1.24.07l5.86-4.82 2.33 2.33c.46.46 1.2.46 1.66 0l.18-.18c.22-.22.38-.49.47-.78l1.63-5.44 1.08-1.08c.45-.45.45-1.18 0-1.63l-3.24-3.24c-.22-.22-.52-.34-.83-.34z"
+        fill={filled ? color : "none"}
+        stroke={color}
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function getContactKey(contact) {
   return `${String(contact.name || "").toLowerCase()}|${String(contact.city || "").toLowerCase()}`;
+}
+
+function getLinkedInContactKey(contact) {
+  const normalized = normalizeContact(contact);
+  const urlKey = normalizeLooseText(normalized.url);
+  if (urlKey) return `linkedin-url|${urlKey}`;
+  return [
+    normalizeLooseText(normalized.name),
+    normalizeCompanyKey(normalized.company),
+    normalizeLooseText(normalized.position),
+    normalizeLooseText(normalized.connectedOn),
+  ].join("|");
+}
+
+function getImportedContactKey(contact) {
+  const normalized = normalizeContact(contact);
+  if (normalized.source === "linkedin") return getLinkedInContactKey(normalized);
+  const emailKey = normalizeLooseText(normalized.email);
+  if (emailKey) return `${normalized.source}-email|${emailKey}`;
+  const urlKey = normalizeLooseText(normalized.url);
+  if (urlKey) return `${normalized.source}-url|${urlKey}`;
+  return [
+    normalized.source,
+    normalizeLooseText(normalized.name),
+    normalizeCompanyKey(normalized.company),
+    normalizeLooseText(normalized.position),
+    normalizeLooseText(normalized.connectedOn),
+    normalizeCityKey(normalized.city),
+  ].join("|");
+}
+
+function getPersistentContactKey(contact) {
+  const normalized = normalizeContact(contact);
+  if (normalized.source === "linkedin" || normalized.source === "google" || normalized.source === "outlook") {
+    return getImportedContactKey(normalized);
+  }
+  return getContactKey(normalized);
 }
 
 function geocodeContact(contact) {
@@ -514,6 +1068,321 @@ function geocodeContact(contact) {
   }
   const coords = geocodeCity(normalized.city);
   return coords ? { ...normalized, lat: coords.lat, lng: coords.lng } : { ...normalized, lat: null, lng: null };
+}
+
+function resolveKnownCity(cityName) {
+  const coords = geocodeCity(cityName);
+  if (!coords) return null;
+  return {
+    city: getKnownCityLabel(cityName),
+    lat: coords.lat,
+    lng: coords.lng,
+  };
+}
+
+function buildContactSearchQueries(contact) {
+  const parts = [contact.name, contact.company, contact.position].filter(Boolean);
+  const quoted = parts.map((part) => `"${String(part).trim()}"`).join(" ");
+  const googleQuery = quoted || `"${String(contact.name || "").trim()}"`;
+  const linkedInQuery = [contact.name && `"${String(contact.name).trim()}"`, contact.company && `"${String(contact.company).trim()}"`, "site:linkedin.com/in"]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    google: `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`,
+    linkedin: `https://www.google.com/search?q=${encodeURIComponent(linkedInQuery)}`,
+  };
+}
+
+function buildCompanySearchQueries(group) {
+  const companyLabel = String(group?.label || "").trim();
+  const googleQuery = `${companyLabel} office city location`.trim();
+  const linkedInQuery = `${companyLabel} site:linkedin.com`.trim();
+  return {
+    google: `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`,
+    linkedin: `https://www.google.com/search?q=${encodeURIComponent(linkedInQuery)}`,
+  };
+}
+
+function openSearchUrl(url) {
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function buildCompanyEvidence(contacts) {
+  const evidence = new Map();
+  contacts
+    .map(geocodeContact)
+    .filter((contact) => contact.city && typeof contact.lat === "number" && typeof contact.lng === "number")
+    .forEach((contact) => {
+      const companyKey = normalizeCompanyKey(contact.company);
+      if (!companyKey || LINKEDIN_GENERIC_COMPANIES.has(companyKey)) return;
+
+      const cityKey = normalizeCityKey(contact.city);
+      if (!cityKey) return;
+
+      if (!evidence.has(companyKey)) {
+        evidence.set(companyKey, {
+          companyKey,
+          totalCount: 0,
+          cityCounts: new Map(),
+        });
+      }
+
+      const bucket = evidence.get(companyKey);
+      bucket.totalCount += 1;
+      const existingCity = bucket.cityCounts.get(cityKey) || { city: getKnownCityLabel(contact.city), count: 0 };
+      existingCity.count += 1;
+      existingCity.city = getKnownCityLabel(contact.city);
+      bucket.cityCounts.set(cityKey, existingCity);
+    });
+
+  evidence.forEach((entry) => {
+    const sortedCities = Array.from(entry.cityCounts.entries())
+      .map(([cityKey, cityEntry]) => ({ cityKey, city: cityEntry.city, count: cityEntry.count }))
+      .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city));
+    entry.cities = sortedCities;
+    entry.dominantCity = sortedCities[0] || null;
+    entry.secondCity = sortedCities[1] || null;
+    entry.dominantShare = entry.dominantCity ? entry.dominantCity.count / entry.totalCount : 0;
+  });
+
+  return evidence;
+}
+
+function classifyCompanyConfidence(companyKey, companyEvidence) {
+  if (!companyKey) {
+    return {
+      confidence: "low",
+      city: "",
+      candidates: [],
+      reason: "No company evidence available for this contact",
+    };
+  }
+
+  if (LINKEDIN_GENERIC_COMPANIES.has(companyKey)) {
+    return {
+      confidence: "low",
+      city: "",
+      candidates: [],
+      reason: "Company is too generic or multi-office to guess reliably",
+    };
+  }
+
+  if (!companyEvidence || !companyEvidence.dominantCity) {
+    return {
+      confidence: "low",
+      city: "",
+      candidates: [],
+      reason: "No reusable company evidence yet",
+    };
+  }
+
+  const dominant = companyEvidence.dominantCity;
+  const candidates = companyEvidence.cities.slice(0, 3).map((entry) => entry.city);
+  const sharePercent = Math.round(companyEvidence.dominantShare * 100);
+
+  if (companyEvidence.dominantShare >= 0.8 && companyEvidence.totalCount >= 2) {
+    return {
+      confidence: "high",
+      city: dominant.city,
+      candidates,
+      reason: `Company strongly matched ${dominant.city} (${dominant.count} of ${companyEvidence.totalCount} known contacts)`,
+    };
+  }
+
+  if ((companyEvidence.dominantShare >= 0.55 && companyEvidence.dominantShare < 0.8) || companyEvidence.totalCount === 1) {
+    const reason =
+      companyEvidence.totalCount === 1
+        ? `Only one known local example points to ${dominant.city}`
+        : `Company usually maps to ${dominant.city} (${dominant.count} of ${companyEvidence.totalCount} known contacts, ${sharePercent}%)`;
+    return {
+      confidence: "medium",
+      city: dominant.city,
+      candidates,
+      reason,
+    };
+  }
+
+  return {
+    confidence: "low",
+    city: "",
+    candidates,
+    reason: "Company appears in multiple cities with no clear winner",
+  };
+}
+
+function inferCityFromLocalHeuristics(contact) {
+  const normalized = normalizeContact(contact);
+  const combinedText = normalizeLooseText([normalized.company, normalized.position].filter(Boolean).join(" "));
+  const companyKey = normalizeCompanyKey(normalized.company);
+
+  for (const hint of LINKEDIN_CITY_TEXT_HINTS) {
+    if (!hint.pattern.test(combinedText)) continue;
+    const resolved = resolveKnownCity(hint.city);
+    if (!resolved) continue;
+    return {
+      city: resolved.city,
+      confidence: hint.confidence,
+      reason: hint.reason,
+      candidates: [resolved.city],
+    };
+  }
+
+  const exactHint = LINKEDIN_EXACT_COMPANY_CITY_HINTS.get(companyKey);
+  if (exactHint) {
+    const resolved = resolveKnownCity(exactHint.city);
+    if (resolved) {
+      return {
+        city: resolved.city,
+        confidence: exactHint.confidence,
+        reason: exactHint.reason,
+        candidates: [resolved.city],
+      };
+    }
+  }
+
+  for (const hint of LINKEDIN_COMPANY_CITY_HINTS) {
+    if (!hint.pattern.test(companyKey)) continue;
+    const resolved = resolveKnownCity(hint.city);
+    if (!resolved) continue;
+    return {
+      city: resolved.city,
+      confidence: hint.confidence,
+      reason: hint.reason,
+      candidates: [resolved.city],
+    };
+  }
+
+  return null;
+}
+
+function guessImportedContactCity(contact, evidenceTable) {
+  const normalized = normalizeContact(contact);
+  const explicitCity = resolveKnownCity(normalized.city);
+  const contactCandidates = Array.isArray(normalized.guessCandidates) ? normalized.guessCandidates : [];
+  if (explicitCity) {
+    return {
+      status: "explicit",
+      contact: {
+        ...normalized,
+        ...explicitCity,
+        needsLocation: false,
+        citySource: "csv",
+        guessConfidence: null,
+        guessReason: "",
+        guessCandidates: Array.from(new Set([explicitCity.city, ...contactCandidates])).slice(0, 3),
+      },
+    };
+  }
+
+  const companyKey = normalizeCompanyKey(normalized.company);
+  const classification = classifyCompanyConfidence(companyKey, evidenceTable.get(companyKey));
+  const heuristicGuess = inferCityFromLocalHeuristics(normalized);
+  const effectiveClassification =
+    classification.confidence === "low" && heuristicGuess
+      ? heuristicGuess
+      : classification;
+
+  if ((effectiveClassification.confidence === "high" || effectiveClassification.confidence === "medium") && effectiveClassification.city) {
+    const guessedCity = resolveKnownCity(effectiveClassification.city);
+    if (guessedCity) {
+      const combinedCandidates = Array.from(
+        new Set([guessedCity.city, ...(effectiveClassification.candidates || []), ...contactCandidates])
+      ).slice(0, 3);
+      return {
+        status: "guessed",
+        contact: {
+          ...normalized,
+          ...guessedCity,
+          needsLocation: false,
+          citySource: "inferred_company",
+          guessConfidence: effectiveClassification.confidence,
+          guessReason: effectiveClassification.reason,
+          guessCandidates: combinedCandidates,
+        },
+      };
+    }
+  }
+
+  return {
+    status: "unresolved",
+    contact: {
+      ...normalized,
+      city: "",
+      lat: null,
+      lng: null,
+      needsLocation: true,
+      citySource: undefined,
+      guessConfidence: "low",
+      guessReason: effectiveClassification.reason,
+      guessCandidates: Array.from(new Set([...(effectiveClassification.candidates || []), ...contactCandidates])).slice(0, 3),
+    },
+  };
+}
+
+function dedupeImportedContacts(importedContacts, existingContacts, source) {
+  const existingKeys = new Set(
+    existingContacts
+      .filter((contact) => normalizeContact(contact).source === source)
+      .map((contact) => getImportedContactKey({ ...contact, source }))
+  );
+  const seenKeys = new Set();
+  const unique = [];
+  let duplicateCount = 0;
+  let invalidCount = 0;
+
+  importedContacts.forEach((contact) => {
+    const normalized = normalizeContact({ ...contact, source });
+    if (!normalizeLooseText(normalized.name)) {
+      invalidCount += 1;
+      return;
+    }
+    const key = getImportedContactKey(normalized);
+    if (existingKeys.has(key) || seenKeys.has(key)) {
+      duplicateCount += 1;
+      return;
+    }
+    seenKeys.add(key);
+    unique.push(normalized);
+  });
+
+  return { unique, duplicateCount, invalidCount };
+}
+
+function summarizeLinkedInImportSession(session) {
+  if (!session) return null;
+  const summary = {
+    totalImported: session.items.length,
+    explicitCount: 0,
+    guessedHighCount: 0,
+    guessedMediumCount: 0,
+    unresolvedCount: 0,
+    duplicateCount: session.duplicateCount || 0,
+    invalidCount: session.invalidCount || 0,
+  };
+
+  session.items.forEach((item) => {
+    const contact = normalizeContact(item.contact);
+    if (contact.needsLocation || !contact.city) {
+      summary.unresolvedCount += 1;
+      return;
+    }
+    if (contact.citySource === "csv" || contact.citySource === "manual") {
+      summary.explicitCount += 1;
+      return;
+    }
+    if (contact.citySource === "inferred_company" && contact.guessConfidence === "high") {
+      summary.guessedHighCount += 1;
+      return;
+    }
+    if (contact.citySource === "inferred_company" && contact.guessConfidence === "medium") {
+      summary.guessedMediumCount += 1;
+      return;
+    }
+    summary.explicitCount += 1;
+  });
+
+  return summary;
 }
 
 function haversineKm(lat1, lng1, lat2, lng2) {
@@ -550,6 +1419,7 @@ function getProjectedTripRadius(lat, lng, radiusKm, width, height, zoom, center)
 }
 
 function getAvatarSrc(contact, size = 96) {
+  if (!isDefaultDemoContact(contact)) return null;
   try {
     if (window.PinPalAvatar && typeof window.PinPalAvatar.getDataUri === "function") {
       return window.PinPalAvatar.getDataUri(contact, size);
@@ -655,24 +1525,29 @@ function PinPal() {
   const [view, setView] = useState("landing"); // landing | map
   const [selectedCity, setSelectedCity] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filters, setFilters] = useState({ google: true, linkedin: true, manual: true });
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
+  const [filters, setFilters] = useState({ google: true, linkedin: true, outlook: true, manual: true });
   const [showManualForm, setShowManualForm] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const [toast, setToast] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const mapRef = useRef(null);
   const svgMapRef = useRef(null);
   const svgPreviewRef = useRef(null);
   const fileInputRef = useRef(null);
+  const googleCsvInputRef = useRef(null);
+  const outlookCsvInputRef = useRef(null);
   const importInputRef = useRef(null);
   const [mapCenter, setMapCenter] = useState({ lat: 20, lng: 15 });
   const [mapZoom, setMapZoom] = useState(1.3);
   const [hoveredCity, setHoveredCity] = useState(null);
   const [manualForm, setManualForm] = useState({ name: "", city: "", company: "", position: "", note: "", tags: "" });
   const [csvDragOver, setCsvDragOver] = useState(false);
-  const [pendingLinkedIn, setPendingLinkedIn] = useState(null); // contacts needing city assignment
+  const [showGoogleGuide, setShowGoogleGuide] = useState(false);
+  const [showOutlookGuide, setShowOutlookGuide] = useState(false);
   const [showLinkedInGuide, setShowLinkedInGuide] = useState(false);
-  const [guideStep, setGuideStep] = useState(0);
+  const [importSession, setImportSession] = useState(null);
+  const [importManualCityDrafts, setImportManualCityDrafts] = useState({});
+  const [importGroupDrafts, setImportGroupDrafts] = useState({});
   const [previewZoom, setPreviewZoom] = useState(DEFAULT_PREVIEW_ZOOM);
   const [previewCenter, setPreviewCenter] = useState(DEFAULT_PREVIEW_CENTER);
   const [showTripPlanner, setShowTripPlanner] = useState(false);
@@ -680,6 +1555,14 @@ function PinPal() {
   const [tripDraft, setTripDraft] = useState({ destination: "", radiusKm: 100, notes: "" });
   const [tripPlan, setTripPlan] = useState(null);
   const [selectedContactProfile, setSelectedContactProfile] = useState(null);
+  const [profileCityDraft, setProfileCityDraft] = useState("");
+  const [citySearchQuery, setCitySearchQuery] = useState("");
+  const [showUnresolvedEditor, setShowUnresolvedEditor] = useState(false);
+  const [unresolvedCityDrafts, setUnresolvedCityDrafts] = useState({});
+  const [unresolvedSearchQuery, setUnresolvedSearchQuery] = useState("");
+  const [unresolvedCompanyCityDraft, setUnresolvedCompanyCityDraft] = useState("");
+  const [selectedUnresolvedCompanyKey, setSelectedUnresolvedCompanyKey] = useState(null);
+  const [isUnresolvedEditorExpanded, setIsUnresolvedEditorExpanded] = useState(false);
   const mapViewportRef = useRef({ zoom: DEFAULT_MAP_ZOOM, center: DEFAULT_MAP_CENTER });
   const previewViewportRef = useRef({ zoom: DEFAULT_PREVIEW_ZOOM, center: DEFAULT_PREVIEW_CENTER });
   const suppressMapClickRef = useRef(false);
@@ -727,7 +1610,8 @@ function PinPal() {
       { name: "Mei Tanaka", city: "Osaka", company: "Panasonic", position: "Engineer", source: "linkedin" },
     ]; */
     const defaultContacts = demo.map(geocodeContact).filter((c) => c.lat);
-    const mergedContacts = new Map(defaultContacts.map((contact) => [getContactKey(contact), contact]));
+    const defaultKeySet = new Set(defaultContacts.map((contact) => getPersistentContactKey(contact)));
+    const mergedContacts = new Map();
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
@@ -735,10 +1619,9 @@ function PinPal() {
         if (Array.isArray(parsed) && parsed.length) {
           parsed
             .map(geocodeContact)
-            .filter((c) => c.lat)
             .forEach((contact) => {
-              const key = getContactKey(contact);
-              if (!mergedContacts.has(key) && !LEGACY_DEFAULT_CONTACT_KEYS.has(key)) {
+              const key = getPersistentContactKey(contact);
+              if (!defaultKeySet.has(key) && !LEGACY_DEFAULT_CONTACT_KEYS.has(key) && !mergedContacts.has(key)) {
                 mergedContacts.set(key, contact);
               }
             });
@@ -748,11 +1631,14 @@ function PinPal() {
       }
     }
     setContacts(Array.from(mergedContacts.values()));
-    setView("map");
+    setView(mergedContacts.size > 0 ? "map" : "landing");
   }, []);
 
   useEffect(() => {
-    if (!contacts.length) return;
+    if (!contacts.length) {
+      window.localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(contacts));
   }, [contacts]);
 
@@ -850,75 +1736,312 @@ function PinPal() {
     }
   }, [view]);
 
+  useEffect(() => {
+    setProfileCityDraft(selectedContactProfile?.city || "");
+  }, [selectedContactProfile]);
+
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Filtered + geocoded contacts
-  const geoContacts = contacts.filter((c) => c.lat && c.lng && filters[c.source]);
+  const defaultContactKeySet = useMemo(() => getDefaultContactKeySet(), []);
+  const hasDemoContactsLoaded = contacts.some((contact) => isDefaultDemoContact(contact, defaultContactKeySet));
+  const hasNonDemoContactsLoaded = contacts.some((contact) => !isDefaultDemoContact(contact, defaultContactKeySet));
+  const unresolvedCommittedContacts = useMemo(
+    () =>
+      contacts
+        .map(normalizeContact)
+        .filter((contact) => !isDefaultDemoContact(contact, defaultContactKeySet))
+        .filter((contact) => contact.needsLocation || !contact.city || typeof contact.lat !== "number" || typeof contact.lng !== "number"),
+    [contacts, defaultContactKeySet]
+  );
+  const normalizedUnresolvedSearch = normalizeLooseText(unresolvedSearchQuery);
+  const unresolvedDerived = useMemo(() => {
+    if (!showUnresolvedEditor) {
+      return {
+        visibleUnresolvedContacts: [],
+        unresolvedFilteredContacts: [],
+        unresolvedCompanyGroups: [],
+      };
+    }
+    const visibleUnresolvedContacts = unresolvedCommittedContacts;
+    const unresolvedCompanyCounts = visibleUnresolvedContacts.reduce((acc, contact) => {
+      const companyKey = normalizeCompanyKey(contact.company) || "__no_company__";
+      acc[companyKey] = (acc[companyKey] || 0) + 1;
+      return acc;
+    }, {});
+    const unresolvedFilteredContacts = visibleUnresolvedContacts
+      .filter((contact) => {
+        if (!normalizedUnresolvedSearch) return true;
+        const searchableText = [
+          contact.name,
+          contact.company,
+          contact.position,
+          contact.note,
+          contact.guessReason,
+          ...(contact.tags || []),
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return normalizeLooseText(searchableText).includes(normalizedUnresolvedSearch);
+      })
+      .sort((a, b) => {
+        const companyCountDiff =
+          (unresolvedCompanyCounts[normalizeCompanyKey(b.company) || "__no_company__"] || 0) -
+          (unresolvedCompanyCounts[normalizeCompanyKey(a.company) || "__no_company__"] || 0);
+        if (companyCountDiff) return companyCountDiff;
+        const companyCompare = (a.company || "No company").localeCompare(b.company || "No company");
+        if (companyCompare) return companyCompare;
+        return a.name.localeCompare(b.name);
+      });
+    const unresolvedCompanyGroups = Object.values(
+      unresolvedFilteredContacts.reduce((acc, contact) => {
+        const companyKey = normalizeCompanyKey(contact.company) || "__no_company__";
+        if (!acc[companyKey]) {
+          acc[companyKey] = {
+            key: companyKey,
+            label: contact.company || "No company listed",
+            contacts: [],
+          };
+        }
+        acc[companyKey].contacts.push(contact);
+        return acc;
+      }, {})
+    ).sort((a, b) => b.contacts.length - a.contacts.length || a.label.localeCompare(b.label));
+    return {
+      visibleUnresolvedContacts,
+      unresolvedFilteredContacts,
+      unresolvedCompanyGroups,
+    };
+  }, [
+    showUnresolvedEditor,
+    unresolvedCommittedContacts,
+    normalizedUnresolvedSearch,
+  ]);
+  const {
+    visibleUnresolvedContacts,
+    unresolvedFilteredContacts,
+    unresolvedCompanyGroups,
+  } = unresolvedDerived;
+  const selectedUnresolvedCompany =
+    unresolvedCompanyGroups.find((group) => group.key === selectedUnresolvedCompanyKey) || unresolvedCompanyGroups[0] || null;
+  const visibleBaseContacts = importSession ? stripDefaultDemoContacts(contacts, defaultContactKeySet) : contacts;
+  const importPreviewContacts = importSession ? importSession.items.map((item) => normalizeContact(item.contact)) : [];
+  const allContacts = [...visibleBaseContacts, ...importPreviewContacts];
+  const importSummary = summarizeLinkedInImportSession(importSession);
 
-  // Group by city
-  const cityGroups = {};
-  geoContacts.forEach((c) => {
-    const key = `${c.lat.toFixed(2)},${c.lng.toFixed(2)}`;
-    if (!cityGroups[key]) cityGroups[key] = { key, city: c.city, lat: c.lat, lng: c.lng, contacts: [] };
-    cityGroups[key].contacts.push(c);
-  });
+  useEffect(() => {
+    if (!showUnresolvedEditor) return;
+    if (!unresolvedCompanyGroups.length) {
+      if (selectedUnresolvedCompanyKey !== null) setSelectedUnresolvedCompanyKey(null);
+      return;
+    }
+    const hasSelectedCompany = unresolvedCompanyGroups.some((group) => group.key === selectedUnresolvedCompanyKey);
+    if (!hasSelectedCompany) {
+      setSelectedUnresolvedCompanyKey(unresolvedCompanyGroups[0].key);
+    }
+  }, [showUnresolvedEditor, unresolvedCompanyGroups, selectedUnresolvedCompanyKey]);
+
+  useEffect(() => {
+    if (!showUnresolvedEditor && selectedUnresolvedCompanyKey !== null) {
+      setSelectedUnresolvedCompanyKey(null);
+    }
+  }, [showUnresolvedEditor, selectedUnresolvedCompanyKey]);
+
+  useEffect(() => {
+    setUnresolvedCompanyCityDraft("");
+  }, [selectedUnresolvedCompanyKey]);
+
+  useEffect(() => {
+    if (!showTripPlanner && !showUnresolvedEditor) return;
+    function handleOverlayEscape(event) {
+      if (event.key !== "Escape") return;
+      if (showUnresolvedEditor) {
+        setShowUnresolvedEditor(false);
+        return;
+      }
+      if (showTripPlanner) {
+        setShowTripPlanner(false);
+      }
+    }
+    window.addEventListener("keydown", handleOverlayEscape);
+    return () => window.removeEventListener("keydown", handleOverlayEscape);
+  }, [showTripPlanner, showUnresolvedEditor]);
+
+  // Filtered + geocoded contacts
+  const geoContacts = allContacts.filter((c) => c.lat && c.lng && filters[c.source]);
+
+  const { cityGroups, cityGroupList, cityGroupByKey } = useMemo(() => {
+    const grouped = {};
+    geoContacts.forEach((contact) => {
+      const key = `${contact.lat.toFixed(2)},${contact.lng.toFixed(2)}`;
+      if (!grouped[key]) {
+        grouped[key] = { key, city: contact.city, lat: contact.lat, lng: contact.lng, contacts: [] };
+      }
+      grouped[key].contacts.push(contact);
+    });
+    const list = Object.values(grouped);
+    list.forEach((group) => {
+      group.contacts.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || a.name.localeCompare(b.name));
+    });
+    const byKey = Object.fromEntries(list.map((group) => [group.key, group]));
+    return { cityGroups: grouped, cityGroupList: list, cityGroupByKey: byKey };
+  }, [geoContacts]);
+
+  const activeSelectedCity = selectedCity ? cityGroupByKey[selectedCity.key] || selectedCity : null;
+  const normalizedCitySearch = normalizeLooseText(citySearchQuery);
+  const visibleCityContacts = useMemo(() => {
+    if (!activeSelectedCity) return [];
+    if (!normalizedCitySearch) return activeSelectedCity.contacts;
+    return activeSelectedCity.contacts.filter((contact) => {
+      const searchableText = [contact.name, contact.company, contact.position].filter(Boolean).join(" ");
+      return normalizeLooseText(searchableText).includes(normalizedCitySearch);
+    });
+  }, [activeSelectedCity, normalizedCitySearch]);
+
+  useEffect(() => {
+    setCitySearchQuery("");
+  }, [activeSelectedCity?.key]);
+
+  const searchableCityGroups = useMemo(
+    () =>
+      cityGroupList.map((group) => ({
+        group,
+        aggregateText: normalizeLooseText(
+          group.contacts.flatMap((contact) => [contact.company, contact.position, ...(contact.tags || [])]).filter(Boolean).join(" ")
+        ),
+      })),
+    [cityGroupList]
+  );
+
+  const searchableGeoContacts = useMemo(
+    () =>
+      geoContacts.map((contact) => ({
+        contact,
+        cityKey: `${contact.lat.toFixed(2)},${contact.lng.toFixed(2)}`,
+        normalizedName: normalizeLooseText(contact.name),
+        normalizedCompany: normalizeLooseText(contact.company),
+        normalizedCity: normalizeLooseText(contact.city),
+        normalizedPosition: normalizeLooseText(contact.position),
+        normalizedTags: normalizeLooseText((contact.tags || []).join(" ")),
+        normalizedNote: normalizeLooseText(contact.note),
+      })),
+    [geoContacts]
+  );
+
+  const searchableUnresolvedContacts = useMemo(
+    () =>
+      unresolvedCommittedContacts.map((contact) => ({
+        contact,
+        normalizedName: normalizeLooseText(contact.name),
+        normalizedCompany: normalizeLooseText(contact.company),
+        normalizedPosition: normalizeLooseText(contact.position),
+        normalizedGuessReason: normalizeLooseText(contact.guessReason),
+        normalizedTags: normalizeLooseText((contact.tags || []).join(" ")),
+        normalizedNote: normalizeLooseText(contact.note),
+      })),
+    [unresolvedCommittedContacts]
+  );
 
   // Search
   const searchResults = searchQuery.trim()
     ? (() => {
-        const query = searchQuery.trim().toLowerCase();
-        const cityMatches = Object.values(cityGroups)
-          .filter((g) => {
-            const cityText = [g.city, ...g.contacts.flatMap((c) => [c.company, c.position, ...(c.tags || [])])]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase();
-            return cityText.includes(query);
+        const query = normalizeLooseText(searchQuery);
+        const cityMatches = searchableCityGroups
+          .map(({ group: g, aggregateText }) => {
+            const score = Math.max(
+              getSearchFieldScore(query, g.city, { base: 240 }),
+              getSearchFieldScore(query, aggregateText, { base: 120 })
+            );
+            if (score < 0) return null;
+            return {
+              type: "city",
+              key: g.key,
+              title: g.city,
+              subtitle: `${g.contacts.length} contact${g.contacts.length > 1 ? "s" : ""}`,
+              cityGroup: g,
+              score: score + Math.min(g.contacts.length, 50),
+            };
           })
-          .map((g) => ({
-            type: "city",
-            key: g.key,
-            title: g.city,
-            subtitle: `${g.contacts.length} contact${g.contacts.length > 1 ? "s" : ""}`,
-            cityGroup: g,
-          }));
+          .filter(Boolean);
 
-        const contactMatches = geoContacts
-          .filter((c) =>
-            [c.name, c.city, c.company, c.position, c.note, ...(c.tags || [])]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase()
-              .includes(query)
-          )
-          .slice(0, 8)
-          .map((c, index) => ({
-            type: "contact",
-            key: `${c.name}-${c.city}-${index}`,
-            title: c.name,
-            subtitle: [c.city, c.company, c.position].filter(Boolean).join(" - "),
-            cityGroup: Object.values(cityGroups).find((g) => g.city === c.city && g.contacts.some((gc) => gc.name === c.name)) || null,
-          }));
+        const contactMatches = searchableGeoContacts
+          .map(({ contact: c, cityKey, normalizedName, normalizedCompany, normalizedCity, normalizedPosition, normalizedTags, normalizedNote }) => {
+            const score = Math.max(
+              getSearchFieldScore(query, normalizedName, { base: 320 }),
+              getSearchFieldScore(query, normalizedCompany, { base: 220 }),
+              getSearchFieldScore(query, normalizedCity, { base: 180 }),
+              getSearchFieldScore(query, normalizedPosition, { base: 170 }),
+              getSearchFieldScore(query, normalizedTags, { base: 150 }),
+              getSearchFieldScore(query, normalizedNote, { base: 110 })
+            );
+            if (score < 0) return null;
+            return {
+              type: "contact",
+              key: `contact-${getPersistentContactKey(c)}`,
+              title: c.name,
+              subtitle: [c.city, c.company, c.position].filter(Boolean).join(" - "),
+              cityGroup: cityGroupByKey[cityKey] || null,
+              contact: c,
+              score: score + (c.pinned ? 12 : 0),
+            };
+          })
+          .filter(Boolean);
+
+        const unresolvedMatches = searchableUnresolvedContacts
+          .map(({ contact: c, normalizedName, normalizedCompany, normalizedPosition, normalizedGuessReason, normalizedTags, normalizedNote }) => {
+            const score = Math.max(
+              getSearchFieldScore(query, normalizedName, { base: 300 }),
+              getSearchFieldScore(query, normalizedCompany, { base: 210 }),
+              getSearchFieldScore(query, normalizedPosition, { base: 170 }),
+              getSearchFieldScore(query, normalizedGuessReason, { base: 140 }),
+              getSearchFieldScore(query, normalizedTags, { base: 150 }),
+              getSearchFieldScore(query, normalizedNote, { base: 110 })
+            );
+            if (score < 0) return null;
+            return {
+              type: "unresolved_contact",
+              key: `unresolved-${getPersistentContactKey(c)}`,
+              title: c.name,
+              subtitle: ["Needs city", c.company, c.position].filter(Boolean).join(" - "),
+              contact: c,
+              score,
+            };
+          })
+          .filter(Boolean);
 
         const destinationMatches = Object.entries(CITY_DB)
-          .filter(([name]) => name.includes(query))
           .filter(([name]) => !cityMatches.some((match) => normalizeCityKey(match.title) === name))
-          .slice(0, 6)
-          .map(([name, coords]) => ({
-            type: "destination",
-            key: `destination-${name}`,
-            title: toSentenceCasePlace(name),
-            subtitle: "Known city - no contacts yet",
-            cityGroup: null,
-            coords,
-          }));
+          .map(([name, coords]) => {
+            const title = toSentenceCasePlace(name);
+            const score = getSearchFieldScore(query, title, { base: 130 });
+            if (score < 0) return null;
+            return {
+              type: "destination",
+              key: `destination-${name}`,
+              title,
+              subtitle: "Known city - no contacts yet",
+              cityGroup: null,
+              coords,
+              score,
+            };
+          })
+          .filter(Boolean);
 
-        return [...cityMatches, ...contactMatches, ...destinationMatches].slice(0, 12);
+        return [...cityMatches, ...contactMatches, ...unresolvedMatches, ...destinationMatches]
+          .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+          .slice(0, 12);
       })()
     : [];
+
+  useEffect(() => {
+    setSearchActiveIndex((prev) => {
+      if (!searchResults.length) return -1;
+      if (prev < 0) return 0;
+      return Math.min(prev, searchResults.length - 1);
+    });
+  }, [searchResults]);
 
   const activeTripPlan = tripPlan
     ? {
@@ -945,16 +2068,81 @@ function PinPal() {
       }, {})
     : {};
 
-  const topHubs = Object.values(cityGroups)
+  const topHubs = cityGroupList
     .slice()
     .sort((a, b) => b.contacts.length - a.contacts.length || a.city.localeCompare(b.city))
     .slice(0, 8);
 
+  function mutateImportItems(predicate, updater) {
+    setImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map((item) => {
+          if (!predicate(item)) return item;
+          const nextItem = updater(item);
+          return {
+            ...nextItem,
+            contact: normalizeContact(nextItem.contact),
+          };
+        }),
+      };
+    });
+  }
+
+  function toManualImportItem(item, cityName, reason = "City set during review") {
+    const manualContact = toManualPlacedContact(item.contact, cityName, reason);
+    if (!manualContact) return null;
+    return {
+      ...item,
+      status: "explicit",
+      reviewed: true,
+      selected: false,
+      contact: manualContact,
+    };
+  }
+
+  function toManualPlacedContact(contact, cityName, reason = "City updated manually") {
+    const resolvedCity = resolveKnownCity(cityName);
+    if (!resolvedCity) return null;
+    const normalized = normalizeContact(contact);
+    return {
+      ...normalized,
+      ...resolvedCity,
+      needsLocation: false,
+      locationReviewDeferred: false,
+      citySource: "manual",
+      guessConfidence: null,
+      guessReason: reason,
+      guessCandidates: Array.from(new Set([resolvedCity.city, ...normalized.guessCandidates])).slice(0, 3),
+    };
+  }
+
+  function toUnresolvedImportItem(item, reason = "Marked unresolved during review") {
+    return {
+      ...item,
+      status: "unresolved",
+      reviewed: true,
+      selected: false,
+      contact: {
+        ...normalizeContact(item.contact),
+        city: "",
+        lat: null,
+        lng: null,
+        needsLocation: true,
+        locationReviewDeferred: false,
+        citySource: undefined,
+        guessConfidence: "low",
+        guessReason: reason,
+      },
+    };
+  }
+
   function addContacts(newContacts) {
     const geocoded = newContacts.map(geocodeContact);
     setContacts((prev) => {
-      const existing = new Set(prev.map(getContactKey));
-      const unique = geocoded.filter((c) => !existing.has(getContactKey(c)));
+      const existing = new Set(prev.map(getPersistentContactKey));
+      const unique = geocoded.filter((c) => !existing.has(getPersistentContactKey(c)));
       return [...prev, ...unique];
     });
     const mapped = geocoded.filter((c) => c.lat);
@@ -964,7 +2152,135 @@ function PinPal() {
     if (mapped.length) setView("map");
   }
 
-  function handleLinkedInUpload(text) {
+  function toggleImportSelection(itemId) {
+    mutateImportItems(
+      (item) => item.id === itemId,
+      (item) => ({ ...item, selected: !item.selected })
+    );
+  }
+
+  function acceptAllGuessesForCity(cityName) {
+    mutateImportItems(
+      (item) => item.status === "guessed" && normalizeCityKey(item.contact.city) === normalizeCityKey(cityName),
+      (item) => ({ ...item, reviewed: true, selected: false })
+    );
+  }
+
+  function moveSelectedGuessesToCity(cityName) {
+    const targetCity = String(importGroupDrafts[cityName] || "").trim();
+    const resolvedCity = resolveKnownCity(targetCity);
+    if (!resolvedCity) {
+      showToast("Pick a known city to move those contacts", "warn");
+      return;
+    }
+
+    let movedCount = 0;
+    mutateImportItems(
+      (item) => item.status === "guessed" && normalizeCityKey(item.contact.city) === normalizeCityKey(cityName) && item.selected,
+      (item) => {
+        movedCount += 1;
+        return toManualImportItem(item, resolvedCity.city, `Moved from ${item.contact.city} to ${resolvedCity.city} during review`);
+      }
+    );
+
+    if (!movedCount) {
+      showToast("Select one or more contacts first", "warn");
+      return;
+    }
+
+    setImportGroupDrafts((prev) => ({ ...prev, [cityName]: "" }));
+    showToast(`Moved ${movedCount} contact${movedCount === 1 ? "" : "s"} to ${resolvedCity.city}`);
+  }
+
+  function markSelectedGuessesUnresolved(cityName) {
+    let changedCount = 0;
+    mutateImportItems(
+      (item) => item.status === "guessed" && normalizeCityKey(item.contact.city) === normalizeCityKey(cityName) && item.selected,
+      (item) => {
+        changedCount += 1;
+        return toUnresolvedImportItem(item, `Removed guessed city ${item.contact.city} during review`);
+      }
+    );
+
+    if (!changedCount) {
+      showToast("Select one or more contacts first", "warn");
+      return;
+    }
+
+    showToast(`Marked ${changedCount} contact${changedCount === 1 ? "" : "s"} unresolved`, "warn");
+  }
+
+  function applyManualCityForItem(itemId) {
+    const draftCity = String(importManualCityDrafts[itemId] || "").trim();
+    const resolvedCity = resolveKnownCity(draftCity);
+    if (!resolvedCity) {
+      showToast("That city isn't in PinPal's local city set yet", "warn");
+      return;
+    }
+
+    mutateImportItems(
+      (item) => item.id === itemId,
+      (item) => toManualImportItem(item, resolvedCity.city)
+    );
+    setImportManualCityDrafts((prev) => ({ ...prev, [itemId]: "" }));
+    showToast(`Set city to ${resolvedCity.city}`);
+  }
+
+  function applyCandidateCityForItem(itemId, candidateCity) {
+    const resolvedCity = resolveKnownCity(candidateCity);
+    if (!resolvedCity) {
+      showToast("That candidate city couldn't be resolved locally", "warn");
+      return;
+    }
+
+    mutateImportItems(
+      (item) => item.id === itemId,
+      (item) => toManualImportItem(item, resolvedCity.city, `Picked ${resolvedCity.city} from suggested cities`)
+    );
+    showToast(`Set city to ${resolvedCity.city}`);
+  }
+
+  function getImportSourceLabel(source) {
+    return SOURCE_LABELS[source] || "CSV";
+  }
+
+  function openImportSession(source, parsedContacts) {
+    if (!parsedContacts.length) {
+      showToast("No contacts found in CSV", "error");
+      return;
+    }
+
+    const session = createImportSession(source, parsedContacts, contacts);
+    if (!session.items.length) {
+      if (session.duplicateCount || session.invalidCount) {
+        showToast(
+          `No new ${getImportSourceLabel(source)} contacts to review${session.duplicateCount ? ` (${session.duplicateCount} duplicates skipped)` : ""}`,
+          "warn"
+        );
+      } else {
+        showToast("No contacts found in CSV", "error");
+      }
+      return;
+    }
+
+    setImportSession(session);
+    setImportManualCityDrafts({});
+    setImportGroupDrafts({});
+    const sessionSummary = summarizeLinkedInImportSession(session);
+    const mappedCount = sessionSummary.explicitCount + sessionSummary.guessedHighCount + sessionSummary.guessedMediumCount;
+    if (mappedCount > 0) setView("map");
+    showToast(
+      sessionSummary.totalImported
+        ? `Prepared ${sessionSummary.totalImported} ${getImportSourceLabel(source)} contacts for review`
+        : `Skipped ${session.duplicateCount} duplicate ${getImportSourceLabel(source)} contacts`
+    );
+  }
+
+  function openLinkedInImportSession(parsedContacts) {
+    openImportSession("linkedin", parsedContacts);
+  }
+
+  function legacyHandleLinkedInUpload(text) {
     const parsed = parseLinkedInCSV(text);
     if (!parsed.length) {
       showToast("No contacts found in CSV", "error");
@@ -981,15 +2297,50 @@ function PinPal() {
     }
   }
 
+  function parseCsvBySource(text, source) {
+    if (source === "linkedin") return parseLinkedInCSV(text);
+    if (source === "outlook") return parseOutlookCSV(text);
+    if (source === "google") return parseGoogleContactsCSV(text);
+    return [];
+  }
+
+  function handleCsvTextImport(text, preferredSource = null) {
+    const source = preferredSource || detectCsvSource(text);
+    if (!source) {
+      showToast("Could not detect CSV type. Try LinkedIn, Outlook, or Google Contacts export CSV.", "error");
+      return;
+    }
+    openImportSession(source, parseCsvBySource(text, source));
+  }
+
   function handleFileUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => handleLinkedInUpload(ev.target.result);
+    reader.onload = (ev) => handleCsvTextImport(ev.target.result);
     reader.readAsText(file);
+    e.target.value = "";
   }
 
-  function handleImport(e) {
+  function handleGoogleCsvUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleCsvTextImport(ev.target.result, "google");
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function handleOutlookCsvUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleCsvTextImport(ev.target.result, "outlook");
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function legacyHandleImport(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1021,7 +2372,44 @@ function PinPal() {
     showToast("Contacts exported!");
   }
 
-  function handleManualAdd() {
+  function toggleLandingGuide(guideKey) {
+    const nextGoogle = guideKey === "google" ? !showGoogleGuide : false;
+    const nextOutlook = guideKey === "outlook" ? !showOutlookGuide : false;
+    const nextLinkedIn = guideKey === "linkedin" ? !showLinkedInGuide : false;
+    setShowGoogleGuide(nextGoogle);
+    setShowOutlookGuide(nextOutlook);
+    setShowLinkedInGuide(nextLinkedIn);
+  }
+
+  function clearAllContacts() {
+    setContacts([]);
+    setImportSession(null);
+    setImportManualCityDrafts({});
+    setImportGroupDrafts({});
+    setUnresolvedCompanyCityDraft("");
+    setUnresolvedSearchQuery("");
+    setUnresolvedCityDrafts({});
+    setShowUnresolvedEditor(false);
+    setSelectedUnresolvedCompanyKey(null);
+    setIsUnresolvedEditorExpanded(false);
+    setSelectedCity(null);
+    setSelectedContactProfile(null);
+    setTripPlan(null);
+    setTripDraft({ destination: "", radiusKm: 100, notes: "" });
+    setShowTripPlanner(false);
+    setSidebarMode(null);
+    setSidebarOpen(false);
+    setSearchQuery("");
+    setMapCenter(DEFAULT_MAP_CENTER);
+    setMapZoom(DEFAULT_MAP_ZOOM);
+    setPreviewCenter(DEFAULT_PREVIEW_CENTER);
+    setPreviewZoom(DEFAULT_PREVIEW_ZOOM);
+    setView("map");
+    window.localStorage.removeItem(STORAGE_KEY);
+    showToast("Cleared all contacts", "warn");
+  }
+
+  function legacyHandleManualAdd() {
     if (!manualForm.name.trim() || !manualForm.city.trim()) {
       showToast("Name and city are required", "error");
       return;
@@ -1029,6 +2417,76 @@ function PinPal() {
     addContacts([{ ...manualForm, source: "manual" }]);
     setManualForm({ name: "", city: "", company: "", position: "", note: "", tags: "" });
     setShowManualForm(false);
+  }
+
+  function handleLinkedInUpload(text) {
+    openLinkedInImportSession(parseLinkedInCSV(text));
+  }
+
+  function handleImport(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (Array.isArray(data)) {
+          setContacts(data.map(geocodeContact));
+          setView("map");
+          setImportSession(null);
+          setImportManualCityDrafts({});
+          setImportGroupDrafts({});
+          setUnresolvedSearchQuery("");
+          setUnresolvedCityDrafts({});
+          showToast(`Imported ${data.length} contacts`);
+        } else {
+          showToast("Invalid file format", "error");
+        }
+      } catch {
+        showToast("Could not parse file", "error");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function handleManualAdd() {
+    if (!manualForm.name.trim() || !manualForm.city.trim()) {
+      showToast("Name and city are required", "error");
+      return;
+    }
+    addContacts([{ ...manualForm, source: "manual", citySource: "manual", needsLocation: false }]);
+    setManualForm({ name: "", city: "", company: "", position: "", note: "", tags: "" });
+    setShowManualForm(false);
+  }
+
+  function commitImportSession() {
+    if (!importSession) return;
+    const sessionContacts = importSession.items.map((item) => geocodeContact(item.contact));
+    setContacts((prev) => {
+      const baseContacts = stripDefaultDemoContacts(prev, defaultContactKeySet);
+      const existingKeys = new Set(baseContacts.map((contact) => getPersistentContactKey(contact)));
+      const merged = [...baseContacts];
+      sessionContacts.forEach((contact) => {
+        const key = getPersistentContactKey(contact);
+        if (existingKeys.has(key)) return;
+        merged.push(contact);
+        existingKeys.add(key);
+      });
+      return merged;
+    });
+    setImportSession(null);
+    setImportManualCityDrafts({});
+    setImportGroupDrafts({});
+    setView("map");
+    showToast(`Imported ${sessionContacts.length} ${getImportSourceLabel(importSession.source)} contact${sessionContacts.length === 1 ? "" : "s"}`);
+  }
+
+  function dismissImportSession() {
+    const source = importSession?.source;
+    setImportSession(null);
+    setImportManualCityDrafts({});
+    setImportGroupDrafts({});
+    showToast(`Discarded ${getImportSourceLabel(source)} import review`, "warn");
   }
 
   async function handleTripPlanCreate() {
@@ -1056,6 +2514,7 @@ function PinPal() {
       lng: resolved.lng,
     };
     setTripPlan(nextPlan);
+    setShowUnresolvedEditor(false);
     setShowTripPlanner(true);
     setSidebarMode("trip");
     setSidebarOpen(true);
@@ -1092,8 +2551,149 @@ function PinPal() {
     setSidebarOpen(true);
   }
 
+  function selectSearchResult(result) {
+    if (!result) return;
+    if (result.type === "city" && result.cityGroup) {
+      flyToCity(result.cityGroup);
+    } else if ((result.type === "contact" || result.type === "unresolved_contact") && result.contact) {
+      openContactProfile(result.contact);
+    } else if (result.coords) {
+      setSelectedCity(null);
+      setSidebarOpen(false);
+      setMapCenter({ lat: result.coords.lat, lng: result.coords.lng });
+      setMapZoom(5.5);
+      setTripDraft((draft) => ({ ...draft, destination: result.title }));
+    }
+    setSearchQuery("");
+    setSearchActiveIndex(-1);
+  }
+
   function openContactProfile(contact) {
     setSelectedContactProfile(contact);
+  }
+
+  function togglePinnedContactByKey(contactKey) {
+    let updatedContact = null;
+    setContacts((prev) =>
+      prev.map((contact) => {
+        if (getPersistentContactKey(contact) !== contactKey) return contact;
+        updatedContact = normalizeContact({ ...contact, pinned: !normalizeContact(contact).pinned });
+        return updatedContact;
+      })
+    );
+    if (!updatedContact) return null;
+    if (selectedContactProfile && getPersistentContactKey(selectedContactProfile) === contactKey) {
+      setSelectedContactProfile(updatedContact);
+    }
+    showToast(updatedContact.pinned ? `Pinned ${updatedContact.name} to the top of ${updatedContact.city}` : `Removed ${updatedContact.name} from the top of ${updatedContact.city}`);
+    return updatedContact;
+  }
+
+  function updateContactsByKeys(contactKeys, updater) {
+    const keySet = new Set(contactKeys);
+    const updatedContacts = [];
+    setContacts((prev) =>
+      prev.map((contact) => {
+        const key = getPersistentContactKey(contact);
+        if (!keySet.has(key)) return contact;
+        const nextContact = updater(normalizeContact(contact));
+        if (!nextContact) return contact;
+        const normalizedNext = normalizeContact(nextContact);
+        updatedContacts.push(normalizedNext);
+        return normalizedNext;
+      })
+    );
+    return updatedContacts;
+  }
+
+  function applyManualCityToContactByKey(contactKey, cityName, reason = "City updated manually") {
+    let updatedContact = null;
+    setContacts((prev) =>
+      prev.map((contact) => {
+        if (getPersistentContactKey(contact) !== contactKey) return contact;
+        const manualContact = toManualPlacedContact(contact, cityName, reason);
+        if (!manualContact) return contact;
+        updatedContact = manualContact;
+        return manualContact;
+      })
+    );
+    return updatedContact;
+  }
+
+  function applyManualCityToSelectedContact(cityName) {
+    if (!selectedContactProfile) return;
+    const targetKey = getPersistentContactKey(selectedContactProfile);
+    const manualContact = applyManualCityToContactByKey(targetKey, cityName, "City updated from profile");
+    if (!manualContact) {
+      showToast("That city isn't in PinPal's local city set yet", "warn");
+      return;
+    }
+
+    setSelectedContactProfile(manualContact);
+    setProfileCityDraft(manualContact.city);
+    if (sidebarMode === "city") {
+      setSelectedCity(null);
+      setSidebarMode("summary");
+      setSidebarOpen(true);
+    }
+    showToast(`Set city to ${manualContact.city}`);
+  }
+
+  function applyManualCityToUnresolvedContact(contactKey) {
+    const draftCity = String(unresolvedCityDrafts[contactKey] || "").trim();
+    const manualContact = applyManualCityToContactByKey(contactKey, draftCity, "City updated from unresolved editor");
+    if (!manualContact) {
+      showToast("That city isn't in PinPal's local city set yet", "warn");
+      return;
+    }
+    setUnresolvedCityDrafts((prev) => ({ ...prev, [contactKey]: "" }));
+    if (selectedContactProfile && getPersistentContactKey(selectedContactProfile) === contactKey) {
+      setSelectedContactProfile(manualContact);
+      setProfileCityDraft(manualContact.city);
+    }
+    showToast(`Set city to ${manualContact.city}`);
+  }
+
+  function applyManualCityToMultipleContacts(contactKeys, cityName, reason) {
+    const resolvedCity = resolveKnownCity(cityName);
+    if (!resolvedCity) {
+      showToast("That city isn't in PinPal's local city set yet", "warn");
+      return [];
+    }
+    const updated = updateContactsByKeys(contactKeys, (contact) => toManualPlacedContact(contact, resolvedCity.city, reason));
+    if (!updated.length) {
+      showToast("No unresolved contacts were updated", "warn");
+      return [];
+    }
+    setUnresolvedCityDrafts((prev) => {
+      const next = { ...prev };
+      contactKeys.forEach((key) => delete next[key]);
+      return next;
+    });
+    if (selectedContactProfile && contactKeys.includes(getPersistentContactKey(selectedContactProfile))) {
+      const updatedProfile = updated.find((contact) => getPersistentContactKey(contact) === getPersistentContactKey(selectedContactProfile));
+      if (updatedProfile) {
+        setSelectedContactProfile(updatedProfile);
+        setProfileCityDraft(updatedProfile.city);
+      }
+    }
+    showToast(`Set city to ${resolvedCity.city} for ${updated.length} contact${updated.length === 1 ? "" : "s"}`);
+    return updated;
+  }
+
+  function applySelectedCompanyUnresolvedCity() {
+    if (!selectedUnresolvedCompany) {
+      showToast("Select a company first", "warn");
+      return;
+    }
+    const cityName = String(unresolvedCompanyCityDraft || "").trim();
+    const companyKeys = selectedUnresolvedCompany.contacts.map((contact) => getPersistentContactKey(contact));
+    applyManualCityToMultipleContacts(
+      companyKeys,
+      cityName,
+      `City updated for unresolved company ${selectedUnresolvedCompany.label}`
+    );
+    setUnresolvedCompanyCityDraft("");
   }
 
   function toggleCitySelection(cityGroup) {
@@ -1121,15 +2721,18 @@ function PinPal() {
           try {
             const data = JSON.parse(ev.target.result);
             if (Array.isArray(data)) {
-              setContacts(data);
+              setContacts(data.map(geocodeContact));
               setView("map");
+              setImportSession(null);
+              setImportManualCityDrafts({});
+              setImportGroupDrafts({});
               showToast(`Imported ${data.length} contacts`);
             }
           } catch {
             showToast("Could not parse file", "error");
           }
         } else {
-          handleLinkedInUpload(ev.target.result);
+          handleCsvTextImport(ev.target.result);
         }
       };
       reader.readAsText(file);
@@ -1180,7 +2783,18 @@ function PinPal() {
       { name: "Tom Andersen", city: "Copenhagen", company: "Maersk", position: "Logistics", source: "linkedin" },
       { name: "Yuki Mori", city: "Osaka", company: "Nintendo", position: "Game Design", source: "manual" },
     ]; */
-    addContacts(getDefaultContacts());
+    setContacts(getDefaultContacts().map(geocodeContact));
+    setImportSession(null);
+    setImportManualCityDrafts({});
+    setImportGroupDrafts({});
+    setUnresolvedCompanyCityDraft("");
+    setUnresolvedSearchQuery("");
+    setUnresolvedCityDrafts({});
+    setShowUnresolvedEditor(false);
+    setSelectedUnresolvedCompanyKey(null);
+    setIsUnresolvedEditorExpanded(false);
+    setView("map");
+    showToast("Sample data loaded", "warn");
   }
 
   // ─── Mercator projection helpers ───
@@ -1217,16 +2831,268 @@ function PinPal() {
     { city: "São Paulo", lat: -23.5505, lng: -46.6333, count: 2, color: "#E8541A" },
     { city: "Sydney", lat: -33.8688, lng: 151.2093, count: 1, color: "#E8541A" },
   ];
-  const hasRealContacts = geoContacts.length > 0;
-  const previewDots = hasRealContacts
+  const samplePreviewGroups = {};
+  getDefaultContacts()
+    .map(geocodeContact)
+    .filter((contact) => contact.lat && contact.lng)
+    .forEach((contact) => {
+      const key = `${contact.lat.toFixed(2)},${contact.lng.toFixed(2)}`;
+      if (!samplePreviewGroups[key]) {
+        samplePreviewGroups[key] = { city: contact.city, lat: contact.lat, lng: contact.lng, count: 0, color: "#E8541A" };
+      }
+      samplePreviewGroups[key].count += 1;
+    });
+  const samplePreviewDots = Object.values(samplePreviewGroups);
+  const hasMappedContacts = geoContacts.length > 0;
+  const hasImportedData = contacts.length > 0 || Boolean(importSession?.items.length);
+  const previewDots = hasMappedContacts
     ? Object.values(cityGroups).map((g) => ({ city: g.city, lat: g.lat, lng: g.lng, count: g.contacts.length, color: "#E8541A" }))
-    : fakeDots;
+    : samplePreviewDots;
+  const guessedImportGroups = importSession
+    ? Object.values(
+        importSession.items.reduce((acc, item) => {
+          if (item.status !== "guessed" || !item.contact.city) return acc;
+          const key = item.contact.city;
+          if (!acc[key]) acc[key] = { city: item.contact.city, items: [] };
+          acc[key].items.push(item);
+          return acc;
+        }, {})
+      ).sort((a, b) => b.items.length - a.items.length || a.city.localeCompare(b.city))
+    : [];
+  const unresolvedImportItems = importSession ? importSession.items.filter((item) => item.status === "unresolved") : [];
+
+  function renderImportReviewModal() {
+    if (!importSession || !importSummary) return null;
+    const importSourceLabel = getImportSourceLabel(importSession.source);
+
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(22, 22, 19, 0.48)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+          zIndex: 280,
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "min(1180px, 96vw)",
+            maxHeight: "92vh",
+            overflow: "auto",
+            background: "#F7F5F0",
+            borderRadius: 22,
+            border: "1px solid #E0DDD7",
+            boxShadow: "0 30px 80px rgba(0,0,0,0.18)",
+          }}
+        >
+          <div style={{ padding: "22px 24px 18px", borderBottom: "1px solid #E0DDD7", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "#1A1A18" }}>{importSourceLabel} import review</div>
+              <div style={{ fontSize: 13, color: "#666", marginTop: 6 }}>
+                High and medium confidence guesses are previewed on the map now. Unresolved contacts stay off-map until you fix them.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                {[
+                  { label: "Imported", value: importSummary.totalImported, color: "#1A1A18" },
+                  { label: "Explicit", value: importSummary.explicitCount, color: "#1A1A18" },
+                  { label: "High", value: importSummary.guessedHighCount, color: "#E8541A" },
+                  { label: "Medium", value: importSummary.guessedMediumCount, color: "#C87400" },
+                  { label: "Unresolved", value: importSummary.unresolvedCount, color: "#8B5E3C" },
+                  { label: "Duplicates", value: importSummary.duplicateCount, color: "#888" },
+                  { label: "Invalid", value: importSummary.invalidCount, color: "#888" },
+                ].map((entry) => (
+                  <span
+                    key={entry.label}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 999,
+                      background: "white",
+                      border: "1px solid #E0DDD7",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: entry.color,
+                    }}
+                  >
+                    {entry.label}: {entry.value}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={dismissImportSession} style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#666", fontSize: 14, cursor: "pointer" }}>
+                Discard
+              </button>
+              <button onClick={commitImportSession} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: "#E8541A", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                Import {importSummary.totalImported} contacts
+              </button>
+            </div>
+          </div>
+
+          <div style={{ padding: 24, display: "grid", gap: 18 }}>
+            {guessedImportGroups.length > 0 && (
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A18", marginBottom: 10 }}>Guessed by city</div>
+                <div style={{ display: "grid", gap: 14 }}>
+                  {guessedImportGroups.map((group) => (
+                    <div key={group.city} style={{ background: "white", border: "1px solid #E0DDD7", borderRadius: 16, overflow: "hidden" }}>
+                      <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid #F0EDE8", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#1A1A18" }}>{group.city}</div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                            {group.items.length} guessed contact{group.items.length === 1 ? "" : "s"}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <input
+                            value={importGroupDrafts[group.city] || ""}
+                            onChange={(e) => setImportGroupDrafts((prev) => ({ ...prev, [group.city]: e.target.value }))}
+                            placeholder="Move selected to city..."
+                            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "#F7F5F0", minWidth: 180 }}
+                          />
+                          <button onClick={() => acceptAllGuessesForCity(group.city)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", cursor: "pointer" }}>
+                            Accept all
+                          </button>
+                          <button onClick={() => moveSelectedGuessesToCity(group.city)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "#F7F5F0", color: "#1A1A18", cursor: "pointer" }}>
+                            Move selected
+                          </button>
+                          <button onClick={() => markSelectedGuessesUnresolved(group.city)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#8B5E3C", cursor: "pointer" }}>
+                            Mark unresolved
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ padding: 12, display: "grid", gap: 8 }}>
+                        {group.items.map((item) => (
+                          <div key={item.id} style={{ padding: 12, borderRadius: 12, background: item.reviewed ? "#FCFBF8" : "#F8F1E8", border: "1px solid #EEE7DE" }}>
+                            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                              <input type="checkbox" checked={!!item.selected} onChange={() => toggleImportSelection(item.id)} style={{ marginTop: 4 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                  <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1A18" }}>{item.contact.name}</span>
+                                  <span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: item.contact.guessConfidence === "high" ? "rgba(232,84,26,0.12)" : "rgba(200,116,0,0.12)", color: item.contact.guessConfidence === "high" ? "#E8541A" : "#9A6400" }}>
+                                    {item.contact.guessConfidence === "high" ? "High confidence" : "Medium confidence"}
+                                  </span>
+                                  {item.reviewed && (
+                                    <span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "#EEF3E8", color: "#5D6F49" }}>
+                                      Reviewed
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                                  {[item.contact.company, item.contact.position].filter(Boolean).join(" - ") || "No company or title"}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>{item.contact.guessReason}</div>
+                                {item.contact.guessCandidates.filter((candidate) => normalizeCityKey(candidate) !== normalizeCityKey(item.contact.city)).length > 0 && (
+                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                                    {item.contact.guessCandidates
+                                      .filter((candidate) => normalizeCityKey(candidate) !== normalizeCityKey(item.contact.city))
+                                      .map((candidate) => (
+                                        <button
+                                          key={candidate}
+                                          onClick={() => applyCandidateCityForItem(item.id, candidate)}
+                                          style={{ padding: "5px 10px", borderRadius: 999, border: "1px solid #E0DDD7", background: "white", color: "#666", fontSize: 12, cursor: "pointer" }}
+                                        >
+                                          {candidate}
+                                        </button>
+                                      ))}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                                  <input
+                                    value={importManualCityDrafts[item.id] || ""}
+                                    onChange={(e) => setImportManualCityDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                    placeholder="Set city manually"
+                                    style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", minWidth: 180 }}
+                                  />
+                                  <button onClick={() => applyManualCityForItem(item.id)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "#F7F5F0", cursor: "pointer" }}>
+                                    Set city
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      mutateImportItems(
+                                        (currentItem) => currentItem.id === item.id,
+                                        (currentItem) => toUnresolvedImportItem(currentItem, `Removed guessed city ${currentItem.contact.city} during review`)
+                                      )
+                                    }
+                                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#8B5E3C", cursor: "pointer" }}
+                                  >
+                                    Mark unresolved
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A18", marginBottom: 10 }}>Unresolved queue</div>
+              {unresolvedImportItems.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {unresolvedImportItems.map((item) => (
+                    <div key={item.id} style={{ padding: 14, borderRadius: 14, background: "white", border: "1px solid #E0DDD7" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A18" }}>{item.contact.name}</div>
+                      <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                        {[item.contact.company, item.contact.position].filter(Boolean).join(" - ") || "No company or title"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>{item.contact.guessReason || "No city guess available yet"}</div>
+                      {item.contact.guessCandidates.length > 0 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                          {item.contact.guessCandidates.map((candidate) => (
+                            <button
+                              key={candidate}
+                              onClick={() => applyCandidateCityForItem(item.id, candidate)}
+                              style={{ padding: "5px 10px", borderRadius: 999, border: "1px solid #E0DDD7", background: "#F7F5F0", color: "#666", fontSize: 12, cursor: "pointer" }}
+                            >
+                              {candidate}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                        <input
+                          value={importManualCityDrafts[item.id] || ""}
+                          onChange={(e) => setImportManualCityDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          placeholder="Type a city manually"
+                          style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "#F7F5F0", minWidth: 200 }}
+                        />
+                        <button onClick={() => applyManualCityForItem(item.id)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", cursor: "pointer" }}>
+                          Set city
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: "14px 16px", borderRadius: 14, background: "white", border: "1px solid #E0DDD7", fontSize: 13, color: "#666" }}>
+                  No unresolved contacts in this import batch.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === "landing") {
     return (
       <div
         style={{
           minHeight: "100vh",
+          height: "100vh",
+          overflowY: "auto",
+          overflowX: "hidden",
           background: "#F7F5F0",
           color: "#1A1A18",
           fontFamily: "'DM Sans', sans-serif",
@@ -1272,12 +3138,25 @@ function PinPal() {
                 Import your contacts. See them on a map. Click a city, find your people. Everything stays in your browser.
               </p>
 
+              {hasMappedContacts && (
+                <button onClick={() => setView("map")}
+                  style={{
+                    marginBottom: 16, width: "100%", padding: "14px", borderRadius: 10, border: "none",
+                    background: "#E8541A", color: "white", fontSize: 16, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  Open full map: {geoContacts.length} contacts in {Object.keys(cityGroups).length} cities
+                </button>
+              )}
+
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <button
-                  onClick={() => showToast("Google OAuth requires a deployed app with client ID. Try demo data or CSV upload!", "warn")}
+                  onClick={() => toggleLandingGuide("google")}
                   style={{
-                    padding: "14px 20px", borderRadius: 12, border: "1px solid #E0DDD7",
-                    background: "white", color: "#1A1A18",
+                    padding: "14px 20px", borderRadius: 12, border: "1px solid",
+                    borderColor: showGoogleGuide ? "#4285F4" : "#E0DDD7",
+                    background: showGoogleGuide ? "rgba(66,133,244,0.06)" : "white",
+                    color: "#1A1A18",
                     fontSize: 15, fontWeight: 500, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 12,
                   }}
@@ -1291,13 +3170,74 @@ function PinPal() {
                     </svg>
                   </span>
                   <div style={{ textAlign: "left", flex: 1 }}>
-                    <div>Connect Google Contacts</div>
-                    <div style={{ fontSize: 11, color: "#AAA" }}>Requires OAuth setup</div>
+                    <div>Upload Google Contacts CSV</div>
+                    <div style={{ fontSize: 11, color: "#AAA" }}>How do I get this?</div>
                   </div>
+                  <span style={{ fontSize: 16, color: "#AAA" }}>{showGoogleGuide ? "^" : "v"}</span>
                 </button>
+                {showGoogleGuide && (
+                  <div style={{
+                    background: "rgba(66,133,244,0.04)", border: "1px solid rgba(66,133,244,0.15)",
+                    borderRadius: 12, padding: "14px 16px", display: "grid", gap: 10,
+                  }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1A1A18" }}>Get your Google Contacts CSV</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>1. Open Google Contacts.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>2. Click the export icon in the upper-right toolbar.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>3. Choose <strong>Google CSV</strong> in the export modal.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>4. Export the file, then upload it here.</div>
+                    <button onClick={() => googleCsvInputRef.current?.click()} style={{ marginTop: 2, padding: "8px 14px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #4285F4, #1A73E8)", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer", width: "fit-content" }}>
+                      Upload Google CSV
+                    </button>
+                  </div>
+                )}
+                <input ref={googleCsvInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleGoogleCsvUpload} />
 
                 <button
-                  onClick={() => setShowLinkedInGuide((v) => !v)}
+                  onClick={() => toggleLandingGuide("outlook")}
+                  style={{
+                    padding: "14px 20px", borderRadius: 12, border: "1px solid",
+                    borderColor: showOutlookGuide ? "#0078D4" : "#E0DDD7",
+                    background: showOutlookGuide ? "rgba(0,120,212,0.06)" : "white",
+                    color: "#1A1A18",
+                    fontSize: 15, fontWeight: 500, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 12,
+                  }}
+                >
+                  <span style={{ width: 30, height: 30, borderRadius: 7, background: "white", border: "1px solid #D6E6F5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 5.5h9.2c.44 0 .8.36.8.8v11.4c0 .44-.36.8-.8.8H4.8c-.44 0-.8-.36-.8-.8V6.3c0-.44.36-.8.8-.8z" fill="#0A5FB4"/>
+                      <path d="M13 7.2h7c.55 0 1 .45 1 1v8.6c0 .55-.45 1-1 1h-7z" fill="#0078D4"/>
+                      <path d="M13 8.3l4 3 4-3" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M13 16.8l3.1-2.6M21 16.8l-3.1-2.6" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                      <rect x="5.4" y="7.2" width="6" height="9.6" rx="1.1" fill="#185ABD"/>
+                      <path d="M8.35 9.3c1.65 0 2.8 1.25 2.8 2.98 0 1.77-1.15 3.02-2.86 3.02H6.7V9.3zm-.14 1.37H8.1c.8 0 1.37.62 1.37 1.61 0 .96-.56 1.65-1.34 1.65h-.12z" fill="white"/>
+                    </svg>
+                  </span>
+                  <div style={{ textAlign: "left", flex: 1 }}>
+                    <div>Upload Outlook CSV</div>
+                    <div style={{ fontSize: 11, color: "#AAA" }}>How do I get this?</div>
+                  </div>
+                  <span style={{ fontSize: 16, color: "#AAA" }}>{showOutlookGuide ? "^" : "v"}</span>
+                </button>
+                {showOutlookGuide && (
+                  <div style={{
+                    background: "rgba(0,120,212,0.04)", border: "1px solid rgba(0,120,212,0.15)",
+                    borderRadius: 12, padding: "14px 16px", display: "grid", gap: 10,
+                  }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1A1A18" }}>Get your Outlook contacts CSV</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>1. Open Outlook People / Contacts.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>2. Click <strong>Manage contacts</strong> in the top-right toolbar.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>3. Choose <strong>Export contacts</strong>.</div>
+                    <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>4. Confirm the export, then upload the CSV here.</div>
+                    <button onClick={() => outlookCsvInputRef.current?.click()} style={{ marginTop: 2, padding: "8px 14px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #0078D4, #0A5FB4)", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer", width: "fit-content" }}>
+                      Upload Outlook CSV
+                    </button>
+                  </div>
+                )}
+                <input ref={outlookCsvInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleOutlookCsvUpload} />
+
+                <button
+                  onClick={() => toggleLandingGuide("linkedin")}
                   style={{
                     padding: "14px 20px", borderRadius: 12, border: "1px solid",
                     borderColor: showLinkedInGuide ? "#0A66C2" : "#E0DDD7",
@@ -1350,7 +3290,7 @@ function PinPal() {
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 24 }}>
-                <button onClick={loadDemoData} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E8541A", background: "rgba(232,84,26,0.08)", color: "#E8541A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Load demo data</button>
+                <button onClick={loadDemoData} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E8541A", background: "rgba(232,84,26,0.08)", color: "#E8541A", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Load sample contacts</button>
                 <button onClick={() => importInputRef.current?.click()} style={{ padding: "8px 18px", borderRadius: 99, border: "1px solid #E0DDD7", background: "transparent", color: "#888", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Import saved session</button>
                 <input ref={importInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
               </div>
@@ -1361,15 +3301,10 @@ function PinPal() {
                 </div>
               </div>
 
-              {hasRealContacts && (
-                <button onClick={() => setView("map")}
-                  style={{
-                    marginTop: 20, width: "100%", padding: "14px", borderRadius: 10, border: "none",
-                    background: "#E8541A", color: "white", fontSize: 16, fontWeight: 700, cursor: "pointer",
-                  }}
-                >
-                  Open full map: {geoContacts.length} contacts in {Object.keys(cityGroups).length} cities
-                </button>
+              {hasDemoContactsLoaded && !hasNonDemoContactsLoaded && !importSession && (
+                <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "#FFF7ED", border: "1px solid #F4C99A", fontSize: 12, color: "#9A6400", lineHeight: 1.5 }}>
+                  Sample data loaded. These contacts are fictional demo records, not imported contacts.
+                </div>
               )}
             </div>
             {/* Right column: preview map */}
@@ -1382,26 +3317,28 @@ function PinPal() {
                   boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
                 }}>
                 {/* Label */}
-                {!hasRealContacts && (
+                {!hasImportedData && (
                   <div style={{
                     position: "absolute", top: 14, left: 14, zIndex: 5,
                     padding: "5px 12px", borderRadius: 6,
                     background: "rgba(247,245,240,0.9)",
                     border: "1px solid #E0DDD7",
-                    fontSize: 11, color: "#AAA", fontWeight: 500,
+                    fontSize: 11, color: "#666", fontWeight: 600,
                   }}>
-                    Preview - upload contacts to populate
+                    Sample contacts preview
                   </div>
                 )}
-                {hasRealContacts && (
+                {hasImportedData && (
                   <div style={{
                     position: "absolute", top: 14, left: 14, zIndex: 5,
                     padding: "5px 12px", borderRadius: 6,
                     background: "rgba(247,245,240,0.9)",
-                    border: "1px solid #E8541A",
-                    fontSize: 11, color: "#E8541A", fontWeight: 600,
+                    border: hasMappedContacts ? "1px solid #E8541A" : "1px solid #E0DDD7",
+                    fontSize: 11, color: hasMappedContacts ? "#E8541A" : "#666", fontWeight: 600,
                   }}>
-                    {geoContacts.length} contacts - {Object.keys(cityGroups).length} cities
+                    {hasMappedContacts
+                      ? `${geoContacts.length} contacts - ${Object.keys(cityGroups).length} cities`
+                      : `${importSession?.items.length || contacts.length} contacts loaded`}
                   </div>
                 )}
 
@@ -1501,12 +3438,11 @@ function PinPal() {
                     const { x, y } = projectPoint(dot.lat, dot.lng, PREVIEW_W, PREVIEW_H, previewZoom, previewCenter);
                     if (x < -40 || x > PREVIEW_W + 40 || y < -40 || y > PREVIEW_H + 40) return null;
                     const r = Math.min(20, 8 + dot.count * 2);
-                    const isFake = !hasRealContacts;
                     return (
                       <g key={i}
                         transform={`translate(${x} ${y})`}
                         onClick={() => {
-                          if (hasRealContacts) {
+                          if (hasMappedContacts) {
                             const cityGroup = Object.values(cityGroups).find((g) => g.city === dot.city);
                             setView("map");
                             if (cityGroup) toggleCitySelection(cityGroup);
@@ -1514,35 +3450,32 @@ function PinPal() {
                             setMapZoom(6);
                           }
                         }}
-                        style={{ cursor: hasRealContacts ? "pointer" : "default" }}
+                        style={{ cursor: hasMappedContacts ? "pointer" : "default" }}
                       >
-                        {/* Pulse for real contacts */}
-                        {!isFake && (
-                          <circle cx={0} cy={0} r={r + 6} fill="none" stroke="#E8541A" strokeWidth="1" opacity="0">
-                            <animate attributeName="r" from={r + 2} to={r + 16} dur="2s" repeatCount="indefinite" />
-                            <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
-                          </circle>
-                        )}
+                        <circle cx={0} cy={0} r={r + 6} fill="none" stroke="#E8541A" strokeWidth="1" opacity="0">
+                          <animate attributeName="r" from={r + 2} to={r + 16} dur="2s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
+                        </circle>
                         {/* Main dot */}
                         <circle cx={0} cy={0} r={r}
-                          fill={isFake ? "#C8CFBA" : "#E8541A"}
-                          opacity={isFake ? 0.7 : 0.9}
-                          stroke={isFake ? "#B0B8A0" : "#C84010"}
-                          strokeWidth={isFake ? 1 : 1.5}
+                          fill="#E8541A"
+                          opacity={0.9}
+                          stroke="#C84010"
+                          strokeWidth={1.5}
                         />
                         {/* Count */}
                         <text x={0} y={1} textAnchor="middle" dominantBaseline="central"
-                          fill={isFake ? "#888" : "white"}
+                          fill="white"
                           fontSize={dot.count > 9 ? 9 : 10} fontWeight="700"
                           fontFamily="'DM Sans', sans-serif"
                         >
                           {dot.count}
                         </text>
                         {/* Label */}
-                        {(previewZoom > 2.5 || !isFake) && (
-                          <g style={{ opacity: isFake ? 0.5 : 1, transition: "opacity 0.6s" }}>
+                        {(previewZoom > 2.5 || !hasMappedContacts) && (
+                          <g style={{ opacity: 1, transition: "opacity 0.6s" }}>
                             <text x={0} y={-r - 8} textAnchor="middle" dominantBaseline="central"
-                              fill={isFake ? "#888" : "#1A1A18"} fontSize="10" fontWeight="600"
+                              fill="#1A1A18" fontSize="10" fontWeight="600"
                               fontFamily="'DM Sans', sans-serif"
                             >
                               {dot.city}
@@ -1554,12 +3487,12 @@ function PinPal() {
                   })}
 
                   {/* "Your contacts here" prompt when no real data */}
-                  {!hasRealContacts && (
+                  {!hasImportedData && (
                     <g>
                       <text x={PREVIEW_W / 2} y={PREVIEW_H - 30} textAnchor="middle"
-                        fill="#AAA" fontSize="13" fontFamily="'DM Sans', sans-serif" fontWeight="500"
+                        fill="#888" fontSize="13" fontFamily="'DM Sans', sans-serif" fontWeight="500"
                       >
-                        Your contacts will appear here
+                        Showing sample contacts until you load real ones
                       </text>
                     </g>
                   )}
@@ -1568,6 +3501,8 @@ function PinPal() {
             </div>
           </div>
         </div>
+
+        {renderImportReviewModal()}
 
         {/* Manual entry modal */}
         {showManualForm && (
@@ -1648,7 +3583,7 @@ function PinPal() {
 
   const W = 1200;
   const H = 700;
-  const SIDEBAR_WIDTH = 340;
+  const SIDEBAR_WIDTH = 420;
   const TRIP_PANEL_LEFT_INSET = 356;
   function getFullMapInsets(options = {}) {
     return {
@@ -1707,9 +3642,10 @@ function PinPal() {
 
         {/* Search */}
         <div style={{ flex: 1, maxWidth: 360, position: "relative" }}>
-          <input
+          <DebouncedTextInput
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onCommit={setSearchQuery}
+            onDraftChange={() => setSearchActiveIndex(0)}
             placeholder="Search city, person, company, or tag..."
             style={{
               width: "100%", padding: "8px 12px 8px 36px", borderRadius: 8,
@@ -1717,7 +3653,30 @@ function PinPal() {
               color: "#1A1A18", fontSize: 14, outline: "none", boxSizing: "border-box",
             }}
             onFocus={(e) => e.target.style.borderColor = "#E8541A"}
-            onBlur={(e) => { setTimeout(() => setSearchQuery(""), 200); e.target.style.borderColor = "#E0DDD7"; }}
+            onBlur={(e) => { setTimeout(() => { setSearchQuery(""); setSearchActiveIndex(-1); }, 200); e.target.style.borderColor = "#E0DDD7"; }}
+            onKeyDown={(e) => {
+              if (!searchResults.length) {
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                  setSearchActiveIndex(-1);
+                }
+                return;
+              }
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSearchActiveIndex((prev) => (prev < 0 ? 0 : Math.min(prev + 1, searchResults.length - 1)));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSearchActiveIndex((prev) => (prev <= 0 ? 0 : prev - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                selectSearchResult(searchResults[Math.max(searchActiveIndex, 0)] || searchResults[0]);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setSearchQuery("");
+                setSearchActiveIndex(-1);
+              }
+            }}
           />
           <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#AAA" }}>S</span>
           {searchResults.length > 0 && (
@@ -1729,27 +3688,24 @@ function PinPal() {
               {searchResults.map((g, i) => (
                 <div
                   key={g.key || i}
-                  onClick={() => {
-                    if (g.cityGroup) {
-                      flyToCity(g.cityGroup);
-                    } else if (g.coords) {
-                      setSelectedCity(null);
-                      setSidebarOpen(false);
-                      setMapCenter({ lat: g.coords.lat, lng: g.coords.lng });
-                      setMapZoom(5.5);
-                      setTripDraft((draft) => ({ ...draft, destination: g.title }));
-                    }
-                    setSearchQuery("");
-                  }}
+                  onClick={() => selectSearchResult(g)}
                   style={{
                     padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between",
                     borderBottom: i < searchResults.length - 1 ? "1px solid #F0EDE8" : "none",
+                    background: i === searchActiveIndex ? "rgba(232,84,26,0.08)" : "transparent",
+                    gap: 12,
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = "rgba(232,84,26,0.06)"}
-                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  onMouseEnter={() => setSearchActiveIndex(i)}
                 >
-                  <span style={{ fontSize: 14, color: "#1A1A18" }}>{g.title}</span>
-                  <span style={{ fontSize: 12, color: "#AAA" }}>{g.subtitle}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 14, color: "#1A1A18", fontWeight: g.type === "contact" || g.type === "unresolved_contact" ? 600 : 500 }}>
+                      {g.title}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#AAA", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.subtitle}</div>
+                  </div>
+                  <span style={{ fontSize: 11, color: g.type === "unresolved_contact" ? "#E8541A" : "#AAA", fontWeight: g.type === "unresolved_contact" ? 700 : 500, flexShrink: 0 }}>
+                    {g.type === "city" ? "City" : g.type === "destination" ? "Destination" : g.type === "unresolved_contact" ? "Unresolved" : "Contact"}
+                  </span>
                 </div>
               ))}
             </div>
@@ -1782,10 +3738,18 @@ function PinPal() {
           <button onClick={() => fileInputRef.current?.click()} style={pillBtnStyle}>CSV</button>
           <button onClick={handleExport} style={pillBtnStyle}>Export</button>
           <button onClick={() => importInputRef.current?.click()} style={pillBtnStyle}>Import</button>
+          <button onClick={loadDemoData} style={{ ...pillBtnStyle, color: "#E8541A" }}>Sample contacts</button>
+          <button onClick={clearAllContacts} style={{ ...pillBtnStyle, color: "#8B5E3C" }}>Clear</button>
         </div>
         <input ref={fileInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleFileUpload} />
         <input ref={importInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
       </div>
+
+      {hasDemoContactsLoaded && !hasNonDemoContactsLoaded && !importSession && (
+        <div style={{ padding: "8px 20px", background: "#FFF7ED", borderBottom: "1px solid #F4C99A", fontSize: 12, color: "#9A6400" }}>
+          Sample data loaded. These contacts are fictional demo records and will be removed when you import real data.
+        </div>
+      )}
 
       {/* Map + Sidebar */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
@@ -1984,6 +3948,7 @@ function PinPal() {
           {!showTripPlanner && (
             <button
               onClick={() => {
+                setShowUnresolvedEditor(false);
                 setShowTripPlanner(true);
                 if (tripPlan) {
                   setSidebarMode("trip");
@@ -2011,15 +3976,293 @@ function PinPal() {
             </button>
           )}
 
-          {/* Stats bar */}
+          {/* Stats + unresolved editor dock */}
           <div style={{
-            position: "absolute", bottom: 20, left: 20,
-            padding: "8px 16px", borderRadius: 8, background: "rgba(247,245,240,0.9)",
-            border: "1px solid #E0DDD7",
-            fontSize: 13, color: "#888", display: "flex", gap: 16,
+            position: "absolute", bottom: 20, left: 20, zIndex: 16,
+            display: "grid", gap: 10, alignItems: "flex-start",
           }}>
-            <span><strong style={{ color: "#E8541A" }}>{geoContacts.length}</strong> contacts</span>
-            <span><strong style={{ color: "#E8541A" }}>{Object.keys(cityGroups).length}</strong> cities</span>
+            {showUnresolvedEditor && unresolvedCommittedContacts.length > 0 && (
+              <div style={{
+                width: isUnresolvedEditorExpanded ? "min(960px, calc(100vw - 32px))" : 560,
+                maxWidth: isUnresolvedEditorExpanded ? "calc(100vw - 32px)" : "min(560px, calc(100vw - 32px))",
+                height: isUnresolvedEditorExpanded ? "min(820px, calc(100vh - 56px))" : "min(640px, calc(100vh - 120px))",
+                minWidth: "min(560px, calc(100vw - 32px))",
+                minHeight: 420,
+                background: "rgba(247,245,240,0.97)",
+                border: "1px solid #E0DDD7",
+                borderRadius: 16,
+                boxShadow: "0 18px 40px rgba(0,0,0,0.12)",
+                backdropFilter: "blur(12px)",
+                overflow: "hidden",
+                display: "grid",
+                gridTemplateRows: "auto auto 1fr",
+                resize: "both",
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+              onWheelCapture={(e) => e.stopPropagation()}
+              >
+                <div style={{ padding: "14px 16px 12px", borderBottom: "1px solid #E0DDD7", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A18" }}>Unresolved contacts</div>
+                    <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                      {visibleUnresolvedContacts.length} unresolved contact{visibleUnresolvedContacts.length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button
+                      onClick={() => setIsUnresolvedEditorExpanded((prev) => !prev)}
+                      style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#888", fontSize: 14, cursor: "pointer" }}
+                      title={isUnresolvedEditorExpanded ? "Restore size" : "Expand"}
+                    >
+                      {isUnresolvedEditorExpanded ? "-" : "+"}
+                    </button>
+                    <button
+                      onClick={() => setShowUnresolvedEditor(false)}
+                      style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#888", fontSize: 16, cursor: "pointer" }}
+                    >
+                      X
+                    </button>
+                  </div>
+                </div>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #EAE4DB", display: "grid", gap: 10 }}>
+                  <DebouncedTextInput
+                    value={unresolvedSearchQuery}
+                    onCommit={setUnresolvedSearchQuery}
+                    placeholder="Search unresolved by name, company, title, or note"
+                    style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 13 }}
+                  />
+                  
+                </div>
+                <div
+                  style={{ padding: "12px 16px", borderBottom: "1px solid #EAE4DB", background: "#FBFAF7" }}
+                >
+                  
+                  <div style={{ fontSize: 12, color: "#888" }}>
+                    {unresolvedCompanyGroups.length} compan{unresolvedCompanyGroups.length === 1 ? "y" : "ies"} • {unresolvedFilteredContacts.length} visible contact{unresolvedFilteredContacts.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div
+                  style={{ overflow: "auto", padding: 12, display: "grid", gap: 12 }}
+                  onWheel={(e) => e.stopPropagation()}
+                  onWheelCapture={(e) => e.stopPropagation()}
+                >
+                  {unresolvedCompanyGroups.length > 0 ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)", gap: 12, minHeight: 0, height: "100%" }}>
+                      <div
+                        style={{ borderRadius: 14, background: "white", border: "1px solid #E0DDD7", overflow: "auto" }}
+                        onWheel={(e) => e.stopPropagation()}
+                        onWheelCapture={(e) => e.stopPropagation()}
+                      >
+                        {unresolvedCompanyGroups.map((group, index) => {
+                          const isSelectedGroup = selectedUnresolvedCompany && selectedUnresolvedCompany.key === group.key;
+                          return (
+                            <button
+                              key={group.key}
+                              onClick={() => setSelectedUnresolvedCompanyKey(group.key)}
+                              style={{
+                                width: "100%",
+                                padding: "12px 14px",
+                                border: "none",
+                                borderBottom: index < unresolvedCompanyGroups.length - 1 ? "1px solid #F0EDE8" : "none",
+                                background: isSelectedGroup ? "rgba(232,84,26,0.08)" : "white",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                color: "#1A1A18",
+                              }}
+                            >
+                              <div style={{ fontSize: 14, fontWeight: 700 }}>{group.label}</div>
+                              <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                                {group.contacts.length} unresolved contact{group.contacts.length === 1 ? "" : "s"}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#666", marginTop: 6, lineHeight: 1.45 }}>
+                                {group.contacts.slice(0, 3).map((contact) => contact.name).join(" • ")}
+                                {group.contacts.length > 3 ? ` +${group.contacts.length - 3} more` : ""}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div
+                        style={{ borderRadius: 14, background: "white", border: "1px solid #E0DDD7", overflow: "auto", minWidth: 0 }}
+                        onWheel={(e) => e.stopPropagation()}
+                        onWheelCapture={(e) => e.stopPropagation()}
+                      >
+                        {selectedUnresolvedCompany ? (
+                          <>
+                            <div style={{ padding: "12px 14px", borderBottom: "1px solid #F0EDE8", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A18" }}>{selectedUnresolvedCompany.label}</div>
+                                <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                                  {selectedUnresolvedCompany.contacts.length} unresolved contact{selectedUnresolvedCompany.contacts.length === 1 ? "" : "s"}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#666", marginTop: 6, lineHeight: 1.45 }}>
+                                  {selectedUnresolvedCompany.contacts.slice(0, 3).map((contact) => contact.name).join(" • ")}
+                                  {selectedUnresolvedCompany.contacts.length > 3 ? ` +${selectedUnresolvedCompany.contacts.length - 3} more` : ""}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  onClick={() => openSearchUrl(buildCompanySearchQueries(selectedUnresolvedCompany).google)}
+                                  style={{ padding: "8px 10px", borderRadius: 999, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                                >
+                                  Google
+                                </button>
+                                <button
+                                  onClick={() => openSearchUrl(buildCompanySearchQueries(selectedUnresolvedCompany).linkedin)}
+                                  style={{ padding: "8px 10px", borderRadius: 999, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                                >
+                                  LinkedIn
+                                </button>
+                              </div>
+                            </div>
+                            <div style={{ padding: "12px 14px", borderBottom: "1px solid #F0EDE8", background: "#FBFAF7" }}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <input
+                                  value={unresolvedCompanyCityDraft}
+                                  onChange={(e) => setUnresolvedCompanyCityDraft(e.target.value)}
+                                  placeholder={`Set city for ${selectedUnresolvedCompany.contacts.length} contact${selectedUnresolvedCompany.contacts.length === 1 ? "" : "s"} at ${selectedUnresolvedCompany.label}`}
+                                  style={{ flex: "1 1 260px", padding: "9px 11px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 13 }}
+                                />
+                                <button
+                                  onClick={applySelectedCompanyUnresolvedCity}
+                                  style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                                >
+                                  Set company
+                                </button>
+                              </div>
+                            </div>
+                            <div style={{ display: "grid", gap: 8, padding: 10 }}>
+                              {selectedUnresolvedCompany.contacts.map((contact) => {
+                                const contactKey = getPersistentContactKey(contact);
+                                return (
+                                  <div key={contactKey} style={{ padding: 12, borderRadius: 12, background: "#FCFBF8", border: "1px solid #EEE7DE" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A18" }}>{contact.name}</div>
+                                        <div style={{ fontSize: 12, color: "#666", marginTop: 4, lineHeight: 1.45 }}>
+                                          {[contact.company, contact.position].filter(Boolean).join(" - ") || "No company or title"}
+                                        </div>
+                                      </div>
+                                      {contact.source && (
+                                        <span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: `${SOURCE_COLORS[contact.source]}15`, color: SOURCE_COLORS[contact.source], flexShrink: 0 }}>
+                                          {SOURCE_LABELS[contact.source]}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {!!contact.guessReason && (
+                                      <div style={{ fontSize: 11, color: "#888", marginTop: 8, lineHeight: 1.45 }}>
+                                        {contact.guessReason}
+                                      </div>
+                                    )}
+                                    {contact.guessCandidates.length > 0 && (
+                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                                        {contact.guessCandidates.map((candidate) => (
+                                          <button
+                                            key={candidate}
+                                            onClick={() => {
+                                              const manualContact = applyManualCityToContactByKey(contactKey, candidate, "City picked from unresolved suggestions");
+                                              if (!manualContact) {
+                                                showToast("That candidate city couldn't be resolved locally", "warn");
+                                                return;
+                                              }
+                                              if (selectedContactProfile && getPersistentContactKey(selectedContactProfile) === contactKey) {
+                                                setSelectedContactProfile(manualContact);
+                                                setProfileCityDraft(manualContact.city);
+                                              }
+                                              setUnresolvedCityDrafts((prev) => ({ ...prev, [contactKey]: "" }));
+                                              showToast(`Set city to ${manualContact.city}`);
+                                            }}
+                                            style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid #E0DDD7", background: "#F7F5F0", color: "#666", fontSize: 11, cursor: "pointer" }}
+                                          >
+                                            {candidate}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                                      <input
+                                        value={unresolvedCityDrafts[contactKey] || ""}
+                                        onChange={(e) => setUnresolvedCityDrafts((prev) => ({ ...prev, [contactKey]: e.target.value }))}
+                                        placeholder="Type a city"
+                                        style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "#F7F5F0", minWidth: 180, flex: "1 1 180px" }}
+                                      />
+                                      <button
+                                        onClick={() => applyManualCityToUnresolvedContact(contactKey)}
+                                        style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                                      >
+                                        Set city
+                                      </button>
+                                      <button
+                                        onClick={() => openSearchUrl(buildContactSearchQueries(contact).google)}
+                                        style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                                      >
+                                        Google
+                                      </button>
+                                      <button
+                                        onClick={() => openSearchUrl(buildContactSearchQueries(contact).linkedin)}
+                                        style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                                      >
+                                        LinkedIn
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ padding: "14px 12px", fontSize: 13, color: "#666" }}>
+                            Select a company to review its unresolved contacts.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "14px 12px", borderRadius: 10, background: "white", border: "1px solid #E0DDD7", fontSize: 13, color: "#666" }}>
+                      No unresolved contacts match this search.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{
+                padding: "8px 16px", borderRadius: 8, background: "rgba(247,245,240,0.9)",
+                border: "1px solid #E0DDD7",
+                fontSize: 13, color: "#888", display: "flex", gap: 16,
+                backdropFilter: "blur(8px)",
+              }}>
+                <span><strong style={{ color: "#E8541A" }}>{geoContacts.length}</strong> contacts</span>
+                <span><strong style={{ color: "#E8541A" }}>{Object.keys(cityGroups).length}</strong> cities</span>
+              </div>
+              {unresolvedCommittedContacts.length > 0 && (
+                <button
+                  onClick={() => {
+                    setShowTripPlanner(false);
+                    setShowUnresolvedEditor((prev) => !prev);
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #E0DDD7",
+                    background: showUnresolvedEditor ? "rgba(232,84,26,0.08)" : "rgba(247,245,240,0.9)",
+                    color: showUnresolvedEditor ? "#E8541A" : "#1A1A18",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    backdropFilter: "blur(8px)",
+                  }}
+                >
+                  <strong style={{ color: "#E8541A" }}>{unresolvedCommittedContacts.length}</strong>
+                  unresolved
+                </button>
+              )}
+            </div>
           </div>
 
           {showTripPlanner && (
@@ -2130,7 +4373,7 @@ function PinPal() {
         {sidebarOpen && (
           <div style={{
             position: "absolute", top: 0, right: 0, bottom: 0,
-            width: 340, background: "white", borderLeft: "1px solid #E0DDD7",
+            width: 392, background: "white", borderLeft: "1px solid #E0DDD7",
             overflow: "auto", zIndex: 20, boxShadow: "0 0 24px rgba(0,0,0,0.08)",
           }}
           onMouseDown={(e) => e.stopPropagation()}
@@ -2203,16 +4446,16 @@ function PinPal() {
                       </div>
                 </div>
               </>
-            ) : sidebarMode === "city" && selectedCity ? (
+            ) : sidebarMode === "city" && activeSelectedCity ? (
             <>
             <div style={{
               padding: "20px 20px 16px", borderBottom: "1px solid #E0DDD7",
               display: "flex", justifyContent: "space-between", alignItems: "center",
             }}>
               <div>
-                <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "#1A1A18" }}>{selectedCity.city}</h2>
+                <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "#1A1A18" }}>{activeSelectedCity.city}</h2>
                 <span style={{ fontSize: 13, color: "#AAA" }}>
-                  {selectedCity.contacts.length} contact{selectedCity.contacts.length > 1 ? "s" : ""}
+                  {visibleCityContacts.length} contact{visibleCityContacts.length !== 1 ? "s" : ""}
                 </span>
               </div>
               <button
@@ -2227,26 +4470,41 @@ function PinPal() {
               </button>
             </div>
 
-            <div style={{ padding: "8px 12px" }}>
-              {selectedCity.contacts.map((c, i) => (
+            <div style={{ padding: "12px 12px 0" }}>
+              <DebouncedTextInput
+                value={citySearchQuery}
+                onCommit={setCitySearchQuery}
+                placeholder={`Search ${activeSelectedCity.city} by name, company, or role`}
+                style={{ width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 13 }}
+              />
+            </div>
+            <div style={{ padding: "8px 12px 14px" }}>
+              {visibleCityContacts.length > 0 ? visibleCityContacts.map((c, i) => (
                 <div
                   key={i}
                   style={{
-                    padding: "14px 12px", borderRadius: 10,
-                    marginBottom: 4, transition: "background 0.15s",
+                    padding: "12px 10px",
+                    borderRadius: 10,
+                    marginBottom: 2,
+                    transition: "background 0.15s, border-color 0.15s",
                     cursor: "default",
+                    border: "1px solid transparent",
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = "#F7F5F0"}
-                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    togglePinnedContactByKey(getPersistentContactKey(c));
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#F7F5F0"; e.currentTarget.style.borderColor = "#EAE4DB"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}
+                  title="Right-click to pin to the top of this city"
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                    {/* Avatar */}
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <button onClick={() => openContactProfile(c)} style={{
-                      width: 58, height: 58, padding: 0, borderRadius: 99,
+                      width: 46, height: 46, padding: 0, borderRadius: 99,
                       background: `${SOURCE_COLORS[c.source]}18`,
                       border: `1.5px solid ${SOURCE_COLORS[c.source]}50`,
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 16, fontWeight: 700, color: SOURCE_COLORS[c.source],
+                      fontSize: 15, fontWeight: 700, color: SOURCE_COLORS[c.source],
                       flexShrink: 0, overflow: "hidden", cursor: "pointer",
                     }}>
                       {getAvatarSrc(c, 128) ? (
@@ -2256,38 +4514,75 @@ function PinPal() {
                       )}
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <button onClick={() => openContactProfile(c)} style={{ padding: 0, border: "none", background: "transparent", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#1A1A18", cursor: "pointer", textAlign: "left", maxWidth: "100%" }}>{c.name}</button>
-                      {(c.position || c.company) && (
-                        <div style={{ fontSize: 12, color: "#AAA", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {[c.position, c.company].filter(Boolean).join(" - ")}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <button onClick={() => openContactProfile(c)} style={{ padding: 0, border: "none", background: "transparent", fontWeight: 700, fontSize: 17, lineHeight: 1.15, color: "#1A1A18", cursor: "pointer", textAlign: "left", flex: 1, minWidth: 0 }}>{c.name}</button>
+                        {c.pinned && (
+                          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#E8541A", flexShrink: 0 }} title="Pinned to top of city">
+                            <PinGlyph filled color="#E8541A" size={14} />
+                          </span>
+                        )}
+                        <span style={{
+                          padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700,
+                          background: `${SOURCE_COLORS[c.source]}15`, color: SOURCE_COLORS[c.source],
+                          flexShrink: 0,
+                        }}>
+                          {SOURCE_LABELS[c.source]}
+                        </span>
+                      </div>
+                      {c.company && (
+                        <div style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#444",
+                          lineHeight: 1.35,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          marginBottom: c.position ? 2 : 0,
+                        }}>
+                          {c.company}
+                        </div>
+                      )}
+                      {c.position && (
+                        <div style={{
+                          fontSize: 13,
+                          color: "#666",
+                          lineHeight: 1.4,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}>
+                          {c.position}
+                        </div>
+                      )}
+                      {c.citySource === "inferred_company" && c.guessConfidence && (
+                        <div style={{ fontSize: 11, color: c.guessConfidence === "high" ? "#E8541A" : "#9A6400", fontWeight: 600, marginTop: 6 }}>
+                          {c.guessConfidence === "high" ? "Guessed location" : "Medium-confidence guess"}
                         </div>
                       )}
                     </div>
-                    {/* Source badge */}
-                    <span style={{
-                      padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600,
-                      background: `${SOURCE_COLORS[c.source]}15`, color: SOURCE_COLORS[c.source],
-                      flexShrink: 0,
-                    }}>
-                      {SOURCE_LABELS[c.source]}
-                    </span>
                   </div>
                   {c.note && (
-                    <div style={{ fontSize: 12, color: "#AAA", marginLeft: 68, fontStyle: "italic" }}>
+                    <div style={{ fontSize: 12, color: "#777", marginLeft: 56, marginTop: 8, fontStyle: "italic", lineHeight: 1.5 }}>
                       "{c.note}"
                     </div>
                   )}
                   {(c.tags || []).length > 0 && (
-                    <div style={{ marginLeft: 68, marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <div style={{ marginLeft: 56, marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {c.tags.map((tag) => (
-                        <span key={tag} style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#F0EDE8", color: "#666" }}>
+                        <span key={tag} style={{ padding: "3px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#F0EDE8", color: "#666" }}>
                           #{tag}
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
-              ))}
+              )) : (
+                <div style={{ padding: "14px 12px", borderRadius: 10, background: "#F7F5F0", border: "1px solid #E0DDD7", fontSize: 13, color: "#888" }}>
+                  No contacts in {activeSelectedCity.city} match this search.
+                </div>
+              )}
             </div>
             </>
             ) : (
@@ -2369,6 +4664,8 @@ function PinPal() {
         )}
       </div>
 
+      {renderImportReviewModal()}
+
       {/* Manual form modal */}
       {selectedContactProfile && (
         <div style={{
@@ -2408,14 +4705,81 @@ function PinPal() {
             </div>
             <div style={{ padding: 22, display: "grid", gap: 14 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {selectedContactProfile.city && (
+                  <button
+                    onClick={() => togglePinnedContactByKey(getPersistentContactKey(selectedContactProfile))}
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 999,
+                      border: `1px solid ${selectedContactProfile.pinned ? "#E8541A" : "#E0DDD7"}`,
+                      background: selectedContactProfile.pinned ? "rgba(232,84,26,0.10)" : "white",
+                      color: selectedContactProfile.pinned ? "#E8541A" : "#666",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    title={selectedContactProfile.pinned ? "Unpin from top of city" : "Pin to top of city"}
+                  >
+                    <PinGlyph filled={selectedContactProfile.pinned} color={selectedContactProfile.pinned ? "#E8541A" : "#888"} size={14} />
+                  </button>
+                )}
                 <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${SOURCE_COLORS[selectedContactProfile.source]}15`, color: SOURCE_COLORS[selectedContactProfile.source] }}>
                   {SOURCE_LABELS[selectedContactProfile.source]}
                 </span>
+                {selectedContactProfile.citySource === "inferred_company" && (
+                  <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: selectedContactProfile.guessConfidence === "high" ? "rgba(232,84,26,0.12)" : "rgba(200,116,0,0.12)", color: selectedContactProfile.guessConfidence === "high" ? "#E8541A" : "#9A6400" }}>
+                    {selectedContactProfile.guessConfidence === "high" ? "Guessed: high confidence" : "Guessed: medium confidence"}
+                  </span>
+                )}
+                {selectedContactProfile.citySource === "manual" && selectedContactProfile.source === "linkedin" && (
+                  <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "#EEF3E8", color: "#5D6F49" }}>
+                    Manually placed
+                  </span>
+                )}
                 {(selectedContactProfile.tags || []).map((tag) => (
                   <span key={tag} style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "#F0EDE8", color: "#666" }}>
                     #{tag}
                   </span>
                 ))}
+              </div>
+              {selectedContactProfile.guessReason && (
+                <div style={{ padding: "12px 14px", borderRadius: 12, background: "#FBF7F1", border: "1px solid #E9E1D6", fontSize: 13, color: "#6D5B48", lineHeight: 1.5 }}>
+                  {selectedContactProfile.guessReason}
+                </div>
+              )}
+              <div style={{ padding: "14px 16px", borderRadius: 14, background: "#F7F5F0", border: "1px solid #E0DDD7", display: "grid", gap: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A18" }}>Update location</div>
+                {selectedContactProfile.guessCandidates.filter((candidate) => normalizeCityKey(candidate) !== normalizeCityKey(selectedContactProfile.city)).length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {selectedContactProfile.guessCandidates
+                      .filter((candidate) => normalizeCityKey(candidate) !== normalizeCityKey(selectedContactProfile.city))
+                      .map((candidate) => (
+                        <button
+                          key={candidate}
+                          onClick={() => applyManualCityToSelectedContact(candidate)}
+                          style={{ padding: "5px 10px", borderRadius: 999, border: "1px solid #E0DDD7", background: "white", color: "#666", fontSize: 12, cursor: "pointer" }}
+                        >
+                          {candidate}
+                        </button>
+                      ))}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    value={profileCityDraft}
+                    onChange={(e) => setProfileCityDraft(e.target.value)}
+                    placeholder="Type a city manually"
+                    style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", minWidth: 220, flex: "1 1 220px" }}
+                  />
+                  <button
+                    onClick={() => applyManualCityToSelectedContact(profileCityDraft)}
+                    style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Set city
+                  </button>
+                </div>
               </div>
               {selectedContactProfile.note && (
                 <div style={{ padding: "14px 16px", borderRadius: 14, background: "#F7F5F0", border: "1px solid #E0DDD7", fontSize: 14, color: "#555", lineHeight: 1.5 }}>
@@ -2428,6 +4792,18 @@ function PinPal() {
                 {selectedContactProfile.city && <div style={{ fontSize: 14, color: "#1A1A18" }}><strong>City:</strong> {selectedContactProfile.city}</div>}
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => openSearchUrl(buildContactSearchQueries(selectedContactProfile).google)}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                >
+                  Google
+                </button>
+                <button
+                  onClick={() => openSearchUrl(buildContactSearchQueries(selectedContactProfile).linkedin)}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #E0DDD7", background: "white", color: "#1A1A18", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                >
+                  LinkedIn
+                </button>
                 {selectedContactProfile.url && (
                   <a
                     href={selectedContactProfile.url}
