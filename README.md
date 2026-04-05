@@ -15,11 +15,16 @@ PinPal turns a contact list into a visual relationship map.
 You can:
 
 - import LinkedIn CSV exports
+- import Google Contacts CSV exports
+- import Outlook CSV exports
 - add contacts manually
 - group contacts by city
 - zoom and pan across a world map
 - search by city, person, company, or tag
+- search within a city sidebar by name, company, or role
 - click into city hubs to see who is there
+- review unresolved contacts by company and assign cities in bulk
+- pin important contacts to the top of a city
 - plan a trip and find contacts within a radius of a destination
 - export and re-import your session as JSON
 
@@ -59,8 +64,17 @@ There is no user account system and no backend database. Imported contacts are s
 PinPal currently supports:
 
 - LinkedIn CSV import
+- Google Contacts CSV import
+- Outlook CSV import
 - manual contact entry
 - JSON export/import for saving a session
+
+For LinkedIn imports, PinPal can also:
+
+- keep unresolved contacts instead of silently dropping them
+- guess locations from local company evidence and built-in hints
+- show guess confidence and reasons
+- let you repair unresolved contacts after import
 
 ### 5. Designed as a Demoable Product
 
@@ -109,9 +123,11 @@ Simple option if you already use VS Code:
 PinPal is privacy-conscious, but not zero-dependency.
 
 - imported contacts are stored in browser local storage on the device being used
+- CSV files are read locally in the browser with `FileReader`; they are not uploaded to a PinPal backend
 - there is no project backend storing user contact data
 - the app currently uses third-party CDNs for libraries and world map assets
 - trip destination lookup can call OpenStreetMap Nominatim when a city is not already known locally
+- explicit Google / LinkedIn lookup buttons open external search pages in a new tab only when the user clicks them
 
 If this were turned into a production product, I would likely:
 
@@ -123,8 +139,9 @@ If this were turned into a production product, I would likely:
 ## Current Limitations
 
 - no authenticated Google Contacts sync yet
-- no editing flow for existing contacts
-- no deduplication review UI
+- no build pipeline or automated test suite yet
+- import quality still depends on local heuristics for many unresolved contacts
+- no fuzzy deduplication or merge review flow yet
 - no backend sync across devices
 - mobile experience can still be improved
 
